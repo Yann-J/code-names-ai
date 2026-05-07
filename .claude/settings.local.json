@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/yannjouanique/.agents/skills/to-prd/**)",
+      "Bash(uv python *)",
+      "Bash(uv sync *)",
+      "Bash(uv run *)"
+    ]
+  }
+}
