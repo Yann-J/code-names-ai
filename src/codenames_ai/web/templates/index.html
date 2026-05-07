@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block body %}
+<p>Notebook-first agents plus a small web UI. Build vocab + fastText caches locally before play.</p>
+<ul>
+    <li><a href="/app/">PWA UI</a> — installable client (build from <code>web-ui/</code>: <code>npm run build</code>).</li>
+    <li><a href="/play">Play</a> — human vs AI or AI-only (assign roles per team).</li>
+    <li><a href="/analysis">Analysis</a> — ranked spymaster candidates for a seeded board.</li>
+</ul>
+<p class="muted">CLI: <code>codenames-ai eval --runs 10 --config agent.yaml</code> · <code>codenames-ai download fasttext</code></p>
+{% endblock %}

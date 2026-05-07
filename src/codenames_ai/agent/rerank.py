@@ -220,8 +220,6 @@ class GuesserReranker:
                     llm_reason=item.reason,
                 )
             )
-        # Tail (beyond the shortlist) keeps embedding-only scoring.
-        out.extend(shortlist[n:])
         return out
 
     @staticmethod

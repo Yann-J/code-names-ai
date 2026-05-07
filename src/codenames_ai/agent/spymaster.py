@@ -157,10 +157,13 @@ class AISpymaster(Spymaster):
         candidates.sort(key=lambda c: c.score, reverse=True)
 
         if self.reranker is not None and candidates:
+            # Per PRD: only the top-K shortlist competes after rerank. The
+            # tail is discarded — embedding-only scores are unbounded while
+            # blended scores live in [0, 1], so they aren't comparable, and
+            # a non-shortlisted candidate "winning" by embedding score alone
+            # would defeat the purpose of asking the LLM.
             shortlist = candidates[: self.reranker.top_k]
-            reranked = self.reranker.rerank(shortlist, view)
-            tail = candidates[self.reranker.top_k :]
-            candidates = list(reranked) + tail
+            candidates = list(self.reranker.rerank(shortlist, view))
             candidates.sort(key=lambda c: c.score, reverse=True)
 
         top = tuple(candidates[: self.top_k])

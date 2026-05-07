@@ -11,3 +11,4 @@ __pycache__/
 *.sqlite
 data/exclusions/*.local.txt
 .DS_Store
+node_modules/

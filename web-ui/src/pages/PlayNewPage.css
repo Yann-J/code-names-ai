@@ -1,0 +1,198 @@
+.play-new__lead {
+  max-width: 32rem;
+  margin-top: 0;
+}
+
+.role-matrix {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, auto) 1fr 1fr;
+  grid-template-rows: auto 1fr 1fr;
+  gap: 0.65rem 0.75rem;
+  align-items: stretch;
+  margin-bottom: 1.25rem;
+  max-width: 36rem;
+}
+
+.role-matrix__corner {
+  min-height: 1rem;
+}
+
+.role-matrix__colhead {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 0.25rem;
+  text-align: center;
+}
+
+.role-matrix__rowhead {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.35rem;
+}
+
+.role-matrix__rowhead--red {
+  background: linear-gradient(160deg, rgba(232, 85, 85, 0.35), rgba(120, 40, 40, 0.25));
+  color: #ffe8e8;
+  border: 1px solid rgba(232, 85, 85, 0.45);
+}
+
+.role-matrix__rowhead--blue {
+  background: linear-gradient(160deg, rgba(68, 149, 232, 0.38), rgba(30, 70, 130, 0.28));
+  color: #e8f4ff;
+  border: 1px solid rgba(91, 140, 255, 0.45);
+}
+
+.role-matrix__cell {
+  border-radius: var(--radius);
+  padding: 0.55rem 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.25rem;
+}
+
+.role-matrix__cell--red {
+  background: rgba(232, 85, 85, 0.08);
+  border: 1px solid rgba(232, 85, 85, 0.2);
+}
+
+.role-matrix__cell--blue {
+  background: rgba(68, 149, 232, 0.1);
+  border: 1px solid rgba(68, 149, 232, 0.22);
+}
+
+.role-segment {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
+  max-width: 11rem;
+}
+
+.role-segment__btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.45rem 0.5rem;
+  border-radius: 999px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.role-segment__btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.role-segment__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.role-segment__btn--on {
+  background: var(--surface2);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.play-new__advanced {
+  max-width: 36rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0;
+}
+
+.play-new__advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.65rem 1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  user-select: none;
+}
+
+.play-new__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.play-new__advanced > summary::after {
+  content: ' ▾';
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.play-new__advanced[open] > summary::after {
+  content: ' ▴';
+}
+
+.play-new__advanced-inner {
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.85rem;
+}
+
+.play-new__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.play-new__field span {
+  font-weight: 600;
+}
+
+.play-new__field input {
+  background: var(--surface2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  min-width: 8rem;
+}
+
+.play-new__field--risk .risk-control__row {
+  min-width: min(100%, 18rem);
+}
+
+.play-new__shuffle {
+  margin-top: 0.4rem;
+  align-self: flex-start;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.play-new__shuffle:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.btn-primary--lg {
+  padding: 0.6rem 1.35rem;
+  font-size: 1rem;
+}

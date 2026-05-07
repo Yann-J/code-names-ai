@@ -1,0 +1,6 @@
+label: baseline
+risk: 0.6
+language: en
+llm_rerank: true
+rerank_top_k: 10
+blend_alpha: 0.35

@@ -15,6 +15,21 @@ from codenames_ai.llm import (
     OpenAICompatibleProvider,
 )
 from codenames_ai.config import Config
+from codenames_ai.eval import (
+    GameRecord,
+    GoldenBoard,
+    GoldenResult,
+    GoodClueOption,
+    aggregate,
+    compare,
+    default_golden_boards,
+    evaluate_golden,
+    evaluate_goldens,
+    golden_pass_rate,
+    iter_golden_cases,
+    run_tournament,
+    save_records,
+)
 from codenames_ai.embedding import (
     EmbeddingMatrix,
     EmbeddingProvider,
@@ -26,11 +41,23 @@ from codenames_ai.game import (
     Card,
     Clue,
     Color,
+    GameState,
     GuesserView,
     SpymasterView,
+    TurnEvent,
+    TurnPhase,
+    check_win,
     generate_board,
     is_legal_clue,
+    reveal_card,
 )
+from codenames_ai.game.human import (
+    HumanGuesser,
+    HumanSpymaster,
+    trivial_guesser_trace,
+    trivial_spymaster_trace,
+)
+from codenames_ai.game.orchestrator import Game
 from codenames_ai.storage import StoragePaths
 from codenames_ai.vocab import Vocabulary, VocabConfig, load_or_build_vocabulary
 
@@ -44,6 +71,14 @@ __all__ = [
     "Clue",
     "Color",
     "Config",
+    "Game",
+    "GameRecord",
+    "GameState",
+    "GoldenBoard",
+    "GoldenResult",
+    "GoodClueOption",
+    "HumanGuesser",
+    "HumanSpymaster",
     "EmbeddingMatrix",
     "EmbeddingProvider",
     "FastTextProvider",
@@ -59,11 +94,26 @@ __all__ = [
     "SpymasterTrace",
     "SpymasterView",
     "StoragePaths",
+    "TurnEvent",
+    "TurnPhase",
     "VocabConfig",
     "Vocabulary",
     "__version__",
+    "aggregate",
+    "check_win",
+    "compare",
+    "default_golden_boards",
+    "evaluate_golden",
+    "evaluate_goldens",
+    "golden_pass_rate",
+    "iter_golden_cases",
     "generate_board",
     "is_legal_clue",
     "load_or_build_embedding_matrix",
     "load_or_build_vocabulary",
+    "reveal_card",
+    "run_tournament",
+    "save_records",
+    "trivial_guesser_trace",
+    "trivial_spymaster_trace",
 ]
