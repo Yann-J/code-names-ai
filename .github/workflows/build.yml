@@ -75,7 +75,6 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_KEY: ${{ secrets.LLM_KEY }}
         run: |
-          umask 077
           {
             echo "LLM_API=${LLM_API}"
             echo "LLM_MODEL=${LLM_MODEL}"
