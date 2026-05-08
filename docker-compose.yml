@@ -1,0 +1,26 @@
+name: codenames-ai
+
+services:
+  app:
+    image: ${IMAGE:-ghcr.io/yann-j/code-names-ai:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codenames-ai
+    # LLM_API / LLM_MODEL / LLM_KEY (and optional CODENAMES_AI_* overrides)
+    # are read from .env next to this file. Copy .env.example -> .env first.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CODENAMES_AI_CACHE_DIR: /cache
+    volumes:
+      # Persist vocab/embedding/llm caches between runs. Drop a downloaded
+      # fastText binary at /cache/models/cc.en.300.bin to enable embeddings.
+      - codenames-cache:/cache
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  codenames-cache:

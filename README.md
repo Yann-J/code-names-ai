@@ -162,6 +162,51 @@ Opens at `http://127.0.0.1:8000`. Two modes:
 
 ---
 
+## Docker
+
+A single production-optimised image bundles everything: Python deps installed with `uv` against `uv.lock`, the React PWA built fresh by Vite in a node stage, and FastAPI/uvicorn serving the API, the Jinja UI, and the PWA at `/app/`. Runs as a non-root user, exposes port `8000`.
+
+### Build and run with docker-compose
+
+```bash
+cp .env.example .env  # fill in LLM_KEY etc.
+docker compose up --build
+```
+
+- Jinja UI + JSON API: <http://localhost:8000>
+- React PWA: <http://localhost:8000/app/>
+
+The `codenames-cache` named volume persists vocabulary, embedding-matrix, and LLM caches under `/cache` (`CODENAMES_AI_CACHE_DIR=/cache`). To use fastText, download `cc.en.300.bin` into that volume:
+
+```bash
+docker compose run --rm app codenames-ai download fasttext --lang en
+```
+
+### Build the image standalone
+
+```bash
+docker build -t codenames-ai:latest .
+```
+
+GitHub Actions (`.github/workflows/docker.yml`) builds the image on every push and pull request with buildx GHA cache. On non-PR events it pushes to **GitHub Container Registry** at `ghcr.io/<owner>/<repo>`, tagged with the short SHA, the branch name, and `latest` on the default branch.
+
+On `main`/`master` pushes it also deploys: the workflow renders `.env` from GitHub secrets, uploads it together with `docker-compose.yml` to the deploy host, then SSHes in to `docker login ghcr.io` (using the workflow's ephemeral `GITHUB_TOKEN`), `docker compose pull`, and `docker compose up -d --remove-orphans`. Required repo secrets:
+
+| Secret | Purpose |
+|---|---|
+| `DEPLOY_HOST` | hostname of the deploy server |
+| `DEPLOY_USER` | SSH user |
+| `DEPLOY_PORT` | optional, defaults to `22` |
+| `DEPLOY_SSH_KEY` | private key for `DEPLOY_USER` |
+| `DEPLOY_PATH` | absolute directory on the host where compose file + `.env` are written |
+| `LLM_API` | LLM endpoint (e.g. `https://api.openai.com/v1`) |
+| `LLM_MODEL` | LLM model name (e.g. `gpt-4o-mini`) |
+| `LLM_KEY` | API key for the LLM endpoint |
+
+> The compose file references `ghcr.io/yann-j/code-names-ai:latest` by default; override per environment with `IMAGE` in `.env`. The GHCR package visibility can stay `private` — the deploy step authenticates with the workflow's `GITHUB_TOKEN`.
+
+---
+
 ## Notebook / library usage
 
 ```python
@@ -308,3 +353,8 @@ codenames_ai/
 ```
 
 The dependency graph flows one way: `game` → `agent` → `llm/embedding/vocab`. The CLI and web layers sit on top and import everything. The top-level `codenames_ai` package re-exports the full public surface.
+
+## TODO
+
+[] Automate refresh of word blacklist from e.g. <https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/master>
+[]

@@ -1,0 +1,42 @@
+.git
+.github
+.venv
+.env
+.pytest_cache
+.ruff_cache
+.ipynb_checkpoints
+.python-version
+.claude
+.cursor
+.vscode
+.idea
+
+# Test & build artefacts that don't belong in the runtime image.
+tests
+notebooks
+issues
+dist
+*.parquet
+*.npz
+*.sqlite
+
+# Python build & cache crud.
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+
+# Front-end build artefacts. The Dockerfile rebuilds the PWA in a node stage
+# and copies the result into src/codenames_ai/web/static/pwa, so the version
+# committed to the repo would otherwise stomp the fresh build.
+web-ui/node_modules
+web-ui/dist
+src/codenames_ai/web/static/pwa
+
+# Editor / OS noise.
+.DS_Store
+*.log
+
+# Container plumbing.
+Dockerfile*
+docker-compose*.yml
+.dockerignore
