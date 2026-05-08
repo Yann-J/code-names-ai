@@ -28,7 +28,9 @@ class EvalRuntime:
     guesser: AIGuesser
 
 
-def _vocab_config(game: EvalAgentConfigFile, *, game_words: bool) -> VocabConfig:
+def _vocab_config(
+    game: EvalAgentConfigFile, *, game_words: bool
+) -> VocabConfig:
     vocab = game.vocabulary
     if game_words:
         return VocabConfig(
@@ -48,8 +50,8 @@ def _vocab_config(game: EvalAgentConfigFile, *, game_words: bool) -> VocabConfig
 
 
 def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
-    scoring = cfg.scoring
     """Load vocab, matrix, and AI players for eval runs."""
+    scoring = cfg.scoring
     storage = StoragePaths.from_config(app)
     storage.ensure()
 
@@ -122,6 +124,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         "margin_floor": scoring.margin_floor,
         "assassin_ceiling": scoring.assassin_ceiling,
         "mc_temperature": scoring.mc_temperature,
+        "mc_rank_bias": scoring.mc_rank_bias,
         "reward_friendly": scoring.reward_friendly,
         "reward_neutral": scoring.reward_neutral,
         "reward_opponent": scoring.reward_opponent,

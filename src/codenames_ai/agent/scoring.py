@@ -48,6 +48,9 @@ class ScoringWeights:
     mc_temperature: float
     """Softmax temperature used to turn similarities into pick likelihoods."""
 
+    mc_rank_bias: float
+    """Extra logit boost for higher-ranked picks in Monte Carlo sampling."""
+
     reward_friendly: float
     reward_neutral: float
     reward_opponent: float
@@ -94,6 +97,7 @@ class ScoringWeights:
             expected_reward_weight=_lerp(1.10, 0.85, r),
             mc_trials=96,
             mc_temperature=_lerp(0.14, 0.22, r),
+            mc_rank_bias=_lerp(1.8, 1.2, r),
             reward_friendly=1.0,
             reward_neutral=-0.35,
             reward_opponent=-0.8,

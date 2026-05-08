@@ -13,7 +13,9 @@ Two vocabularies are built from [wordfreq](https://github.com/rspeer/wordfreq) Z
 - **Game-word vocabulary** — Zipf 4–6.5, nouns only (~500–2000 common concrete nouns for board cards).
 - **Clue-word vocabulary** — Zipf 3–7, nouns + adjectives + verbs (~30–60 K candidate clue words).
 
-Both are cached as Parquet files under `~/.cache/codenames_ai/vocab/`.
+Both are filtered with a configurable profanity exclusion list (default for English at `./data/exclusions/en.txt`, taken from this [public GitHub list](https://github.com/dsojevic/profanity-list/blob/main/en.txt))
+
+Both compiled vocabularies are cached as Parquet files under `~/.cache/codenames_ai/vocab/`.
 
 ### Embedding pipeline
 
@@ -24,17 +26,7 @@ Every word in the clue vocabulary is projected through a **fastText model** (`cc
 1. Compute cosine similarity of every clue candidate against every active board word (one NumPy matrix multiply).
 1. For each clue, consider only *prefix subsets* of the descending-similarity-sorted friendlies (the only subsets that can improve margin).
 1. Apply **hard vetoes**: margin below floor, or similarity to the assassin above ceiling.
-1. Score survivors:
-
-   ```
-   score = friendly_min_sim
-         + ambition_weight × (N−1)
-         + margin_weight × margin
-         + freq_bonus(zipf)
-         − assassin_weight × sim(clue, assassin)
-         − opponent_weight × max sim(clue, opponent)
-   ```
-
+1. Score survivors (based on a fairly complex rule)
 1. Filter for legal clues (drop clues too close to a game word, or offensive words from a simple blacklist dictionary)
 1. Build a lane-balanced shortlist for LLM rerank (target fractions across clue counts `N=1..7`, EV-first ranking within each lane, quality gate + graceful backfill).
 1. Pass the shortlist to an **LLM** (any OpenAI-compatible endpoint) for scoring with a one-sentence reason, in order to capture subtle word connections that pure embeddings miss.
@@ -136,31 +128,7 @@ Runs three curated synthetic boards through the spymaster and checks that it fin
 
 ### Self-play evaluation tournament
 
-Create a YAML config file (see all defaults below):
-
-```yaml
-label: baseline
-risk: 0.5
-vocabulary:
-  language: en
-  game:
-    zipf: {min: 4.0, max: 6.5}
-    allowed_pos: [NOUN]
-  clue:
-    zipf: {min: 3.0, max: 7.0}
-    allowed_pos: [NOUN, ADJ, VERB]
-embedding_top_k: 20    # top embedding candidates sent to the spymaster LLM
-top_k_trace: 200       # how many ranked candidates to keep in the trace / API
-scoring:
-  llm_rerank: true   # set false to skip LLM and use embedding-only agents
-  blend_alpha: 0.5
-  lane_target_fractions: [0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01]
-  adaptive_mc_base_trials: 64
-  adaptive_mc_extra_trials: 96
-  adaptive_mc_ev_band: 0.10
-  ev_llm_gain: 0.35
-  ev_llm_temperature: 0.20
-```
+Use `config/base.yaml` as the single source of truth for eval/serve YAML fields and defaults.
 
 Run a 20-game tournament:
 
@@ -177,66 +145,6 @@ codenames-ai eval --runs 20 --config conservative.yaml --config aggressive.yaml
 Output is a Parquet file in `~/.cache/codenames_ai/evals/` with one row per game. Columns: `label`, `config_hash`, `seed`, `winner`, `first_team`, `num_clues`, `num_guesses`, `correct_guesses`, `assassin_hit`. Summary stats are printed to stdout.
 
 Use `--embedding-only` to override `llm_rerank` in YAML and run without any LLM calls.
-
-#### All YAML fields
-
-| Key | Default | Description |
-|---|---|---|
-| `label` | `"default"` | Name shown in comparison table and stored in parquet |
-| `risk` | `0.5` | Risk knob 0–1 |
-| `vocabulary` | object | Vocabulary filters (language + Zipf/POS for game/clue vocabularies) |
-| `exclusions_path` | `null` | Path to a one-word-per-line exclusion file |
-| `top_k_trace` | `200` | How many candidates to surface in the `SpymasterTrace` after rerank |
-| `embedding_top_k` | `20` | Top embedding-scored candidates sent to the spymaster LLM |
-| `guesser` | object | Guesser config block |
-| `scoring` | object | Top-level scoring config block (see keys below) |
-
-`scoring` block keys:
-
-| Key | Default | Description |
-|---|---|---|
-| `llm_rerank` | `true` | Enable LLM reranking step |
-| `blend_alpha` | `0.5` | α in `α·embedding + (1−α)·llm` blend |
-| `prefer_min_targets` | `3` | Soft minimum friendly count each clue should aim for |
-| `expected_reward_weight` | `1.10` | Weight of Monte Carlo EV term in embedding score |
-| `mc_trials` | `96` | Baseline Monte Carlo trials per `(clue, N)` |
-| `adaptive_mc_base_trials` | `64` | Base EV trials used before adaptive refinement |
-| `adaptive_mc_extra_trials` | `96` | Extra EV trials for near-top lane candidates |
-| `adaptive_mc_ev_band` | `0.10` | EV distance to lane leader that triggers extra trials |
-| `lane_target_fractions` | `[0.18,0.42,0.22,0.10,0.05,0.02,0.01]` | Shortlist target fractions for clue-count lanes `N=1..7` |
-| `lane_quality_delta_ev` | `0.20` | Keep lane entries within this EV delta of lane best before backfill |
-| `lane_max_n` | `7` | Highest lane index; larger counts are bucketed into this lane |
-| `ev_llm_gain` | `0.35` | Strength of EV modulation applied to LLM score in spymaster rerank |
-| `ev_llm_temperature` | `0.20` | Temperature for EV→LLM modulation smoothness |
-| `ambition_weight` | `null` | Optional override for ambition bonus weight |
-| `margin_weight` | `null` | Optional override for margin bonus weight |
-| `freq_weight` | `null` | Optional override for frequency bonus weight |
-| `assassin_weight` | `null` | Optional override for assassin penalty weight |
-| `opponent_weight` | `null` | Optional override for opponent penalty weight |
-| `undercluster_penalty_weight` | `null` | Optional override for undercluster penalty weight |
-| `margin_floor` | `null` | Optional override for hard margin veto floor |
-| `assassin_ceiling` | `null` | Optional override for hard assassin veto ceiling |
-| `mc_temperature` | `null` | Optional override for MC pick softmax temperature |
-| `reward_friendly` | `null` | Optional override for friendly reward in MC rollout |
-| `reward_neutral` | `null` | Optional override for neutral reward in MC rollout |
-| `reward_opponent` | `null` | Optional override for opponent reward in MC rollout |
-| `reward_assassin` | `null` | Optional override for assassin reward in MC rollout |
-
-`vocabulary` block keys:
-
-| Key | Default | Description |
-|---|---|---|
-| `language` | `"en"` | Language code |
-| `game.zipf` | `{min: 4.0, max: 6.5}` | Frequency window for board-card vocabulary |
-| `game.allowed_pos` | `["NOUN"]` | spaCy POS tags kept for game words |
-| `clue.zipf` | `{min: 3.0, max: 7.0}` | Frequency window for clue vocabulary |
-| `clue.allowed_pos` | `["NOUN", "ADJ", "VERB"]` | spaCy POS tags kept for clues |
-
-`guesser` block keys:
-
-| Key | Default | Description |
-|---|---|---|
-| `extra_candidates` | `3` | Extra candidates passed to the guesser LLM beyond N |
 
 ### Web UI
 

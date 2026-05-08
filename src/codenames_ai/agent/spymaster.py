@@ -579,6 +579,7 @@ class AISpymaster(Spymaster):
         if not active_cards:
             return 0.0
         temp = max(1e-3, float(w.mc_temperature))
+        rank_bias = max(0.0, float(w.mc_rank_bias))
         sims = similarities.astype(np.float64)
         trials = max(1, int(trials if trials is not None else w.mc_trials))
         rng = np.random.default_rng(seed)
@@ -597,6 +598,11 @@ class AISpymaster(Spymaster):
             while picks < n and np.any(avail):
                 avail_idx = np.flatnonzero(avail)
                 logits = sims[avail_idx] / temp
+                if rank_bias > 0.0 and len(avail_idx) > 1:
+                    order = np.argsort(-sims[avail_idx])
+                    ranks = np.empty(len(avail_idx), dtype=np.float64)
+                    ranks[order] = np.arange(len(avail_idx), dtype=np.float64)
+                    logits -= rank_bias * np.log1p(ranks)
                 logits -= logits.max()
                 probs = np.exp(logits)
                 probs_sum = probs.sum()

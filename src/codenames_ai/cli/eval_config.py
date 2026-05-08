@@ -75,6 +75,7 @@ class ScoringConfig(BaseModel):
     margin_floor: float | None = Field(default=None, ge=-1.0, le=1.0)
     assassin_ceiling: float | None = Field(default=None, ge=-1.0, le=1.0)
     mc_temperature: float | None = Field(default=None, ge=0.01, le=5.0)
+    mc_rank_bias: float | None = Field(default=None, ge=0.0, le=10.0)
     reward_friendly: float | None = Field(default=None, ge=-10.0, le=10.0)
     reward_neutral: float | None = Field(default=None, ge=-10.0, le=10.0)
     reward_opponent: float | None = Field(default=None, ge=-10.0, le=10.0)

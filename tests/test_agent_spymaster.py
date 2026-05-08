@@ -139,9 +139,7 @@ class TestBasicBehavior:
         assert scores == sorted(scores, reverse=True)
 
     def test_top_candidates_unique_clue_surfaces(self):
-        entries, _, _ = _basic_setup(
-            extra_clues=[("good_clue", [1.0, 0.0], 5.0)]
-        )
+        entries, _, _ = _basic_setup(extra_clues=[("good_clue", [1.0, 0.0], 5.0)])
         matrix, vocab = make_setup(entries)
         board = make_board(
             friendly=_board_words("f", 9),
@@ -155,9 +153,7 @@ class TestBasicBehavior:
         assert len(clues) == len(set(clues))
 
     def test_targets_match_top_friendlies(self):
-        entries, _, _ = _basic_setup(
-            extra_clues=[("clue", [1.0, 0.0], 5.0)]
-        )
+        entries, _, _ = _basic_setup(extra_clues=[("clue", [1.0, 0.0], 5.0)])
         matrix, vocab = make_setup(entries)
         board = make_board(
             friendly=_board_words("f", 9),
@@ -178,7 +174,11 @@ class TestLegality:
     def test_filters_clue_matching_board_word(self):
         entries, _, _ = _basic_setup(
             extra_clues=[
-                ("f0", [1.0, 0.0], 5.0),  # would be a great clue but matches a board word
+                (
+                    "f0",
+                    [1.0, 0.0],
+                    5.0,
+                ),  # would be a great clue but matches a board word
                 ("good_clue", [1.0, 0.0], 5.0),
             ]
         )
@@ -224,9 +224,7 @@ class TestLegality:
 class TestVetoes:
     def test_no_legal_clue_raises(self):
         # Every candidate clue is right next to the assassin → ceiling vetoes.
-        entries, _, _ = _basic_setup(
-            extra_clues=[("near_assassin", [-1.0, -0.3], 5.0)]
-        )
+        entries, _, _ = _basic_setup(extra_clues=[("near_assassin", [-1.0, -0.3], 5.0)])
         matrix, vocab = make_setup(entries)
         board = make_board(
             friendly=_board_words("f", 9),
@@ -302,7 +300,9 @@ class TestRiskKnob:
         aggressive = AISpymaster(matrix, vocab, risk=1.0)
 
         cautious_trace = cautious.give_clue(SpymasterView(board=board, team=Color.RED))
-        aggressive_trace = aggressive.give_clue(SpymasterView(board=board, team=Color.RED))
+        aggressive_trace = aggressive.give_clue(
+            SpymasterView(board=board, team=Color.RED)
+        )
 
         # Aggressive should pick higher-N (or at least not lower) than cautious.
         assert aggressive_trace.chosen.n >= cautious_trace.chosen.n
@@ -311,9 +311,7 @@ class TestRiskKnob:
 class TestExplicitWeightOverride:
     def test_explicit_weights_take_precedence_over_risk(self):
         weights = ScoringWeights.from_risk(0.5)
-        entries, _, _ = _basic_setup(
-            extra_clues=[("clue", [1.0, 0.0], 5.0)]
-        )
+        entries, _, _ = _basic_setup(extra_clues=[("clue", [1.0, 0.0], 5.0)])
         matrix, vocab = make_setup(entries)
         spymaster = AISpymaster(matrix, vocab, risk=0.0, weights=weights)
         assert spymaster.weights == weights
