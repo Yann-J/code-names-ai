@@ -2,9 +2,9 @@ name: docker
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -82,18 +82,18 @@ jobs:
             echo "LLM_KEY=${LLM_KEY}"
           } > .env
 
-      # - name: Copy compose file & .env to deploy host
-      #   if: github.event_name == 'push' && (github.ref == 'refs/heads/main' ||
-      #     github.ref == 'refs/heads/master')
-      #   uses: appleboy/scp-action@v0.1.7
-      #   with:
-      #     host: ${{ secrets.DEPLOY_HOST }}
-      #     username: ${{ secrets.DEPLOY_USER }}
-      #     port: ${{ secrets.DEPLOY_PORT || 22 }}
-      #     key: ${{ secrets.DEPLOY_SSH_KEY }}
-      #     source: "docker-compose.yml,.env"
-      #     target: ${{ secrets.DEPLOY_PATH }}
-      #     overwrite: true
+      - name: Copy compose file & .env to deploy host
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' ||
+          github.ref == 'refs/heads/master')
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "docker-compose.yml,.env"
+          target: ${{ secrets.DEPLOY_PATH }}
+          overwrite: true
 
       - name: Compose pull & up on deploy host
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' ||
@@ -111,13 +111,10 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            pwd
-            whoami
             cd "${{ secrets.DEPLOY_PATH }}"
-            ls -la
-            # echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            # docker compose pull
-            # docker compose up -d --remove-orphans
-            # docker logout ghcr.io || true
-            # docker image prune -f
-            # docker compose ps
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker logout ghcr.io || true
+            docker image prune -f
+            docker compose ps
