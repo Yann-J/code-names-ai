@@ -69,6 +69,12 @@ function buildHistoryRounds(events: api.TurnEventPayload[]): HistoryRound[] {
   return rounds
 }
 
+function winnerReasonText(winReason: api.GameSnapshot['win_reason']): string {
+  if (winReason === 'assassin') return 'by forcing the other team to reveal the assassin.'
+  if (winReason === 'all_words') return 'by revealing all of their team words.'
+  return 'when the game ended.'
+}
+
 export function PlayGamePage() {
   const { gameId } = useParams<{ gameId: string }>()
   const [spyOn, setSpyOn] = useState(() => localStorage.getItem(SPY_KEY) === '1')
@@ -78,6 +84,7 @@ export function PlayGamePage() {
   const [busy, setBusy] = useState(false)
   const [clueWord, setClueWord] = useState('')
   const [clueCount, setClueCount] = useState(1)
+  const [dismissedEndModalFor, setDismissedEndModalFor] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!gameId) return
@@ -165,6 +172,8 @@ export function PlayGamePage() {
   const teamKey = state.current_team === 'BLUE' ? 'blue' : 'red'
 
   const fx = state.guess_flash
+  const showEndModal = state.is_over && dismissedEndModalFor !== state.id
+  const winnerTeam = state.winner ? state.winner.toUpperCase() : 'Unknown'
 
   return (
     <div className={`play-root play-page${spyOn ? ' spy-on' : ''}`}>
@@ -175,6 +184,9 @@ export function PlayGamePage() {
       <h1 className="page-title">
         Game <code>{state.id}</code>
       </h1>
+      <p className="session-meta muted">
+        Session: <code>{state.id}</code> · Seed: <code>{state.seed}</code>
+      </p>
       {err ? <div className="error-banner">{err}</div> : null}
 
       <div className="play-toolbar">
@@ -339,8 +351,7 @@ export function PlayGamePage() {
 
       {state.is_over ? (
         <p>
-          <strong>Game over.</strong>{' '}
-          <Link to="/play">New game</Link>
+          <strong>Game over.</strong> <Link to="/play">New game</Link>
         </p>
       ) : state.ui.waiting_on_ai ? (
         <p className="status-line muted">Waiting on AI…</p>
@@ -376,6 +387,35 @@ export function PlayGamePage() {
               Give clue
             </button>
           </form>
+        </div>
+      ) : null}
+
+      {showEndModal ? (
+        <div className="endgame-modal-backdrop" role="presentation">
+          <section className="endgame-modal" role="dialog" aria-modal="true" aria-labelledby="endgame-modal-title">
+            <h2 id="endgame-modal-title">Game over</h2>
+            <p className="endgame-modal__winner">
+              <strong>{winnerTeam}</strong> wins {winnerReasonText(state.win_reason)}
+            </p>
+            <p className="muted endgame-modal__seed">
+              Replay or analyze this same game with seed <code>{state.seed}</code>.
+            </p>
+            <p className="muted endgame-modal__hint">
+              Use this seed in the New Game advanced section, or in Spymaster Analysis to inspect suggestions on this
+              board.
+            </p>
+            <div className="endgame-modal__actions">
+              <Link to="/play" className="btn-primary">
+                Start a new game
+              </Link>
+              <Link to="/analysis" className="btn-secondary">
+                Open analysis
+              </Link>
+              <button type="button" className="btn-secondary" onClick={() => setDismissedEndModalFor(state.id)}>
+                Close
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
     </div>

@@ -153,10 +153,7 @@ codenames-ai serve
 # or: codenames-ai serve --host 0.0.0.0 --port 8080
 ```
 
-Opens at `http://127.0.0.1:8000`. Two modes:
-
-- **Play** — pick a seed, set risk, assign each of the four roles (Red spymaster, Red guesser, Blue spymaster, Blue guesser) to Human or AI. Human spymasters enter a clue word and count; human guessers enter a comma-separated list of board words.
-- **Analysis** — enter a seed and risk level; the page shows the spymaster's full ranked candidate list with embedding scores, LLM scores, margins, and reasons.
+Opens at `http://127.0.0.1:8000` and serves the React PWA shell plus JSON API endpoints.
 
 > The web server requires the vocabulary and embedding matrix caches to exist. Run `codenames-ai download fasttext` once and the first `eval` or `serve` call will build the caches automatically.
 
@@ -164,7 +161,7 @@ Opens at `http://127.0.0.1:8000`. Two modes:
 
 ## Docker
 
-A single production-optimised image bundles everything: Python deps installed with `uv` against `uv.lock`, the React PWA built fresh by Vite in a node stage, and FastAPI/uvicorn serving the API, the Jinja UI, and the PWA at `/app/`. Runs as a non-root user, exposes port `8000`.
+A single production-optimised image bundles everything: Python deps installed with `uv` against `uv.lock`, the React PWA built fresh by Vite in a node stage, and FastAPI/uvicorn serving the API and PWA shell. Runs as a non-root user, exposes port `8000`.
 
 ### Build and run with docker-compose
 
@@ -173,8 +170,8 @@ cp .env.example .env  # fill in LLM_KEY etc.
 docker compose up --build
 ```
 
-- Jinja UI + JSON API: <http://localhost:8000>
-- React PWA: <http://localhost:8000/app/>
+- App shell + JSON API: <http://localhost:8000>
+- React PWA route: <http://localhost:8000/app/>
 
 The `codenames-cache` named volume persists vocabulary, embedding-matrix, and LLM caches under `/cache` (`CODENAMES_AI_CACHE_DIR=/cache`). To use fastText, download `cc.en.300.bin` into that volume:
 
@@ -349,7 +346,7 @@ codenames_ai/
   game/         — Board, Card, Color, GameState, rules, orchestrator, HumanPlayer
   eval/         — tournament runner, metrics, persist, golden boards
   cli/          — CLI entry point, eval YAML schema, runtime wiring
-  web/          — FastAPI app, Jinja2 templates (Play + Analysis modes)
+  web/          — FastAPI app, JSON API routes, PWA static serving
 ```
 
 The dependency graph flows one way: `game` → `agent` → `llm/embedding/vocab`. The CLI and web layers sit on top and import everything. The top-level `codenames_ai` package re-exports the full public surface.
@@ -357,4 +354,6 @@ The dependency graph flows one way: `game` → `agent` → `llm/embedding/vocab`
 ## TODO
 
 [] Automate refresh of word blacklist from e.g. <https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/master>
-[]
+[] Add French
+[] RL to fine-tune the clue scoring parameters
+[] Shareable URLs with real-time updates via websocket to play remotely

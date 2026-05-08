@@ -41,13 +41,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 
-# ---------- runtime: slim image with venv, source, and PWA bundle ---------
+# ---------- runtime: slim image with venv, source, API, and PWA ------------
 FROM python:3.12-slim-bookworm AS runtime
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CODENAMES_AI_CACHE_DIR=/cache
+    CODENAMES_AI_CACHE_DIR=/cache \
+    CODENAMES_AI_CONFIG=
 
 RUN useradd -r -u 10001 -m -d /home/app -s /usr/sbin/nologin app \
     && mkdir -p /cache \
@@ -73,4 +74,6 @@ VOLUME ["/cache"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status == 200 else 1)"
 
-CMD ["codenames-ai", "serve", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so ${CODENAMES_AI_CONFIG} expands at container start; when unset
+# or empty, no --config flag is appended and the server uses its built-in default.
+CMD codenames-ai serve --host 0.0.0.0 --port 8000 ${CODENAMES_AI_CONFIG:+--config "$CODENAMES_AI_CONFIG"}

@@ -38,11 +38,13 @@ export interface GuessFlash {
 
 export interface GameSnapshot {
   id: string
+  seed: number
   risk: number
   roles: { red: TeamRoles; blue: TeamRoles }
   current_team: string
   current_phase: string
   winner: string | null
+  win_reason: 'assassin' | 'all_words' | null
   is_over: boolean
   guesser_attempts_remaining: number | null
   latest_clue: CluePayload | null

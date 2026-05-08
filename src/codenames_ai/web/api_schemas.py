@@ -10,6 +10,7 @@ from codenames_ai.game.state import TurnPhase
 from codenames_ai.web.play_session import PlaySession
 
 GuessFlashKind = Literal["team", "other", "assassin"]
+WinReason = Literal["assassin", "all_words"]
 
 
 class GuessFlash(BaseModel):
@@ -62,11 +63,13 @@ class GameUiPayload(BaseModel):
 
 class GameSnapshot(BaseModel):
     id: str
+    seed: int
     risk: float
     roles: RolesPayload
     current_team: str
     current_phase: str
     winner: str | None
+    win_reason: WinReason | None = None
     is_over: bool
     guesser_attempts_remaining: int | None
     latest_clue: CluePayload | None
@@ -205,14 +208,23 @@ def build_game_snapshot(
         flash_model = GuessFlash(kind=guess_flash["kind"], word=guess_flash["word"])  # type: ignore[arg-type]
 
     winner_s = st.winner.value if st.winner else None
+    win_reason: WinReason | None = None
+    if st.is_over and st.winner is not None:
+        last_guess = next((ev for ev in reversed(st.turn_history) if ev.kind == "GUESS"), None)
+        if last_guess and last_guess.outcome_color == Color.ASSASSIN:
+            win_reason = "assassin"
+        else:
+            win_reason = "all_words"
 
     return GameSnapshot(
         id=sess.id,
+        seed=st.rng_seed,
         risk=sess.risk,
         roles=_roles_payload(sess),
         current_team=team_now.value,
         current_phase=phase.value,
         winner=winner_s,
+        win_reason=win_reason,
         is_over=st.is_over,
         guesser_attempts_remaining=st.guesser_attempts_remaining,
         latest_clue=_clue_payload(clue) if clue and not clue.is_pass() else None,

@@ -14,7 +14,7 @@ A Python package (`codenames_ai`) that:
 2. **Projects vocabularies through a swappable embedding model**, caching the resulting embedding matrices on disk so the heavy load only happens once.
 3. **Provides spymaster and guesser agents** that combine an embedding-driven candidate-generation algorithm with an LLM-based reranking step. Both agents share a single configurable risk-tolerance knob that adjusts margin requirements, ambition (target count), and stopping policy.
 4. **Exposes a clean game model** (board, state, turn history, role-scoped views) that supports three orchestration modes — single-shot analysis from a notebook, AI-vs-AI self-play, and mixed human/AI play with arbitrary role assignment.
-5. **Ships a FastAPI + HTMX web UI** with a Play mode (human vs AI or watch AI vs AI) and an Analysis mode (paste/generate a board, see ranked clue candidates with full reasoning, tweak risk live).
+5. **Ships a FastAPI JSON API + React PWA UI** with Play mode (human vs AI or watch AI vs AI) and Analysis mode (paste/generate a board, see ranked clue candidates with full reasoning, tweak risk live).
 6. **Includes an evaluation harness** that runs self-play tournaments and curated golden-board tests, so the user can empirically confirm that config or scoring changes actually improve the bot.
 
 All model choices (embedding provider, LLM provider) and tuning knobs are surfaced through a typed Pydantic configuration. English is the only language in v1; the architecture is language-parameterized so additional languages are a configuration + artifact-build away.
@@ -189,7 +189,7 @@ All model choices (embedding provider, LLM provider) and tuning knobs are surfac
 
 ### Web UI
 
-- **Stack:** FastAPI + HTMX + Jinja2. No JS framework, no build pipeline.
+- **Stack:** FastAPI JSON API + React PWA client.
 - **Modes in v1:** Play mode (A) and Analysis mode (B). Game replay (C) deferred.
 - **Single-user, single-session.** Games held in an in-memory registry by game ID. Optionally serialized to the artifact cache for resume.
 - **No DB, no auth, no multi-tenancy** in v1.
@@ -280,7 +280,7 @@ The project ships in eleven milestones, each leaving a notebook-usable deliverab
 - **M6 — Game orchestrator.** `Game.play()` runs AI-vs-AI to completion.
 - **M7 — Eval harness.** Self-play tournaments + golden boards. First baseline numbers.
 - **M8 — `HumanPlayer`.** Notebook-based human play; same interface the UI consumes.
-- **M9 — Web UI.** FastAPI + HTMX, Play + Analysis modes.
+- **M9 — Web UI.** FastAPI JSON API + React PWA, Play + Analysis modes.
 - **M10 — Second language.** Validates that the language abstraction held.
 
 ### Two opinionated sequencing calls

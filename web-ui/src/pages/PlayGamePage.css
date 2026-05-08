@@ -2,6 +2,12 @@
   position: relative;
 }
 
+.session-meta {
+  margin-top: -0.45rem;
+  margin-bottom: 1rem;
+  font-size: 0.86rem;
+}
+
 .play-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -467,6 +473,49 @@
   color: var(--text);
   border-radius: 6px;
   padding: 0.4rem 0.55rem;
+}
+
+.endgame-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(8, 10, 14, 0.72);
+  backdrop-filter: blur(1px);
+}
+
+.endgame-modal {
+  width: min(680px, 100%);
+  background: linear-gradient(165deg, rgba(36, 41, 54, 0.98), rgba(23, 27, 37, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  padding: 1.15rem 1.2rem;
+}
+
+.endgame-modal h2 {
+  margin: 0 0 0.65rem;
+}
+
+.endgame-modal__winner {
+  margin: 0 0 0.45rem;
+  font-size: 1.02rem;
+}
+
+.endgame-modal__seed,
+.endgame-modal__hint {
+  margin: 0 0 0.4rem;
+}
+
+.endgame-modal__actions {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .fx-celebrate {

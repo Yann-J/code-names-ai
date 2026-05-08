@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 export function HomePage() {
   return (
     <div>
-      <h1 className="page-title">Code Names AI</h1>
+      <h1 className="page-title">Word Guess AI</h1>
       <p className="muted">
         This is my experiment to create an AI agent that plays word guessing games, based on both word embedding proximity + LLM scoring of candidate clues (and a very small RL routine to fine-tune all the candidate clue scoring parameters). For more information, see the <a href="https://github.com/Yann-J/code-names-ai">GitHub repository</a>.
       </p>

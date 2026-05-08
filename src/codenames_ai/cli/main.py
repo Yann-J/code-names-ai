@@ -142,7 +142,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="codenames-ai",
-        description="Code Names AI — embeddings, agents, eval, and web UI.",
+        description="Code Names AI — embeddings, agents, eval, and API/PWA serve.",
     )
     p.add_argument(
         "-v",
@@ -207,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     go.add_argument("--top-k", type=int, default=20, dest="top_k")
     go.set_defaults(func=cmd_golden)
 
-    sv = sub.add_parser("serve", help="FastAPI + HTMX web UI")
+    sv = sub.add_parser("serve", help="FastAPI API + React PWA shell")
     sv.add_argument(
         "--config",
         default=None,
