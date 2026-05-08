@@ -64,6 +64,8 @@ scoring:
   margin_floor: null
   assassin_ceiling: null
   mc_temperature: null
+  # Extra rank sharpening in EV rollout pick sampling (0 disables rank bias).
+  mc_rank_bias: null
   reward_friendly: null
   reward_neutral: null
   reward_opponent: null

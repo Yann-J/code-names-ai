@@ -97,7 +97,7 @@ class ScoringWeights:
             expected_reward_weight=_lerp(1.10, 0.85, r),
             mc_trials=96,
             mc_temperature=_lerp(0.14, 0.22, r),
-            mc_rank_bias=_lerp(1.8, 1.2, r),
+            mc_rank_bias=_lerp(1.6, 1.0, r),
             reward_friendly=1.0,
             reward_neutral=-0.35,
             reward_opponent=-0.8,
