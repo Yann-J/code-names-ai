@@ -3,9 +3,19 @@
 }
 
 .session-meta {
-  margin-top: -0.45rem;
-  margin-bottom: 1rem;
+  margin: 0;
   font-size: 0.86rem;
+}
+
+.play-footer {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .play-toolbar {

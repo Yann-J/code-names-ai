@@ -22,7 +22,8 @@ class AIGuesser(Guesser):
       2. Sort descending; always commit pick #1.
       3. Picks 2..N: commit while similarity ≥ `confidence_floor`.
       4. Bonus N+1 pick: commit only when the gap between Nth and (N+1)th
-         is below `bonus_gap_threshold` (negative threshold disables the bonus).
+         is below `bonus_gap_threshold`
+         (negative threshold disables the bonus).
     """
 
     def __init__(
@@ -32,10 +33,16 @@ class AIGuesser(Guesser):
         risk: float = 0.5,
         stop_policy: StopPolicy | None = None,
         reranker: GuesserReranker | None = None,
+        sampling_temperature: float = 0.0,
+        sampling_top_k: int = 0,
+        rng: np.random.Generator | None = None,
     ) -> None:
         self.matrix = matrix
         self.stop_policy = stop_policy or StopPolicy.from_risk(risk)
         self.reranker = reranker
+        self.sampling_temperature = max(0.0, float(sampling_temperature))
+        self.sampling_top_k = max(0, int(sampling_top_k))
+        self.rng = rng or np.random.default_rng()
 
     def guess(self, view: GuesserView, clue: Clue) -> GuesserTrace:
         active = list(view.board.active())
@@ -122,7 +129,9 @@ class AIGuesser(Guesser):
                         tail,
                     )
 
-        guesses, bonus_attempted, stop_reason = self._apply_stop_policy(ranked, clue.count)
+        guesses, bonus_attempted, stop_reason = self._apply_stop_policy(
+            ranked, clue.count
+        )
         return GuesserTrace(
             candidates=tuple(ranked),
             guesses=tuple(g.word for g in guesses),
@@ -141,7 +150,9 @@ class AIGuesser(Guesser):
             )
         missing = [c.word for c in active if c.word not in self.matrix]
         if missing:
-            raise ValueError(f"unrevealed board words missing from matrix: {missing}")
+            raise ValueError(
+                f"unrevealed board words missing from matrix: {missing}"
+            )
 
     def _sims_for(self, cards: list[Card], clue_vec: np.ndarray) -> np.ndarray:
         if not cards:
@@ -159,17 +170,19 @@ class AIGuesser(Guesser):
 
         policy = self.stop_policy
         guesses: list[CandidateGuess] = []
-        # Always commit to #1 (declining outright is a wasted turn).
-        guesses.append(self._commit(ranked, 0, is_bonus=False))
+        # Always commit to one pick (declining outright is a wasted turn).
+        first_rank = self._next_rank(ranked)
+        guesses.append(self._commit(ranked, first_rank, is_bonus=False))
 
         # Picks 2..N — gate on the (potentially blended) `score`, not the raw
         # cosine similarity, so an LLM rerank can lower a card's effective
         # confidence and trigger an early stop.
-        for rank in range(1, min(n, len(ranked))):
-            cand = ranked[rank]
+        for _ in range(1, min(n, len(ranked))):
+            next_rank = self._next_rank(ranked)
+            cand = ranked[next_rank]
             if cand.score < policy.confidence_floor:
                 return guesses, False, "confidence_floor"
-            guesses.append(self._commit(ranked, rank, is_bonus=False))
+            guesses.append(self._commit(ranked, next_rank, is_bonus=False))
 
         if len(guesses) < n:
             return guesses, False, "no_more_candidates"
@@ -177,13 +190,38 @@ class AIGuesser(Guesser):
         # Bonus N+1 attempt
         if n < len(ranked):
             nth_score = guesses[-1].score
-            bonus_cand = ranked[n]
+            next_rank = self._next_rank(ranked)
+            bonus_cand = ranked[next_rank]
             gap = nth_score - bonus_cand.score
             if gap < policy.bonus_gap_threshold:
-                guesses.append(self._commit(ranked, n, is_bonus=True))
+                guesses.append(self._commit(ranked, next_rank, is_bonus=True))
                 return guesses, True, "reached_n_plus_bonus"
 
         return guesses, False, "reached_n"
+
+    def _next_rank(self, ranked: list[CandidateGuess]) -> int:
+        available = [c for c in ranked if not c.committed]
+        if not available:
+            raise ValueError("no available candidates")
+
+        if self.sampling_temperature <= 0.0:
+            return available[0].rank
+
+        top_k = self.sampling_top_k if self.sampling_top_k > 0 else len(available)
+        pool = available[:top_k]
+        scores = np.array([c.score for c in pool], dtype=np.float64)
+        logits = scores / self.sampling_temperature
+        logits -= np.max(logits)
+        probs = np.exp(logits)
+        probs_sum = probs.sum()
+        if probs_sum <= 0.0 or not np.isfinite(probs_sum):
+            return pool[0].rank
+        probs /= probs_sum
+        draw = self.rng.random()
+        cdf = np.cumsum(probs)
+        chosen_idx = int(np.searchsorted(cdf, draw, side="right"))
+        chosen_idx = min(chosen_idx, len(pool) - 1)
+        return pool[chosen_idx].rank
 
     @staticmethod
     def _commit(

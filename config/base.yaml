@@ -40,6 +40,10 @@ top_k_trace: 200
 guesser:
   # Extra candidates passed to the guesser LLM beyond N.
   extra_candidates: 3
+  # Softmax temperature for stochastic guess picks (0.0 => deterministic top-rank picks).
+  sampling_temperature: 0.0
+  # Restrict stochastic picks to top-K candidates (0 => all unrevealed candidates).
+  sampling_top_k: 0
 
 scoring:
   # If true, blend embedding scores with LLM rerank for spymaster + guesser (requires LLM_KEY).

@@ -45,6 +45,8 @@ def test_defaults_embedding_top_k_and_trace() -> None:
     cfg = EvalAgentConfigFile()
     assert cfg.embedding_top_k == 20
     assert cfg.top_k_trace == 200
+    assert cfg.guesser.sampling_temperature == pytest.approx(0.0)
+    assert cfg.guesser.sampling_top_k == 0
     assert cfg.vocabulary.clue.zipf.min == pytest.approx(3.0)
     assert cfg.vocabulary.clue.zipf.max == pytest.approx(7.0)
 

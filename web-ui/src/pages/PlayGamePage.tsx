@@ -75,6 +75,10 @@ function winnerReasonText(winReason: api.GameSnapshot['win_reason']): string {
   return 'when the game ended.'
 }
 
+function teamSide(team: string): 'red' | 'blue' {
+  return team.toUpperCase() === 'BLUE' ? 'blue' : 'red'
+}
+
 export function PlayGamePage() {
   const { gameId } = useParams<{ gameId: string }>()
   const [spyOn, setSpyOn] = useState(() => localStorage.getItem(SPY_KEY) === '1')
@@ -169,7 +173,7 @@ export function PlayGamePage() {
   const guesserIdle = phase !== 'GUESSER' || !clue || (clue.word === '' && clue.count === 0)
   const activeClue =
     phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0)
-  const teamKey = state.current_team === 'BLUE' ? 'blue' : 'red'
+  const teamKey = teamSide(state.current_team)
 
   const fx = state.guess_flash
   const showEndModal = state.is_over && dismissedEndModalFor !== state.id
@@ -184,9 +188,6 @@ export function PlayGamePage() {
       <h1 className="page-title">
         Game <code>{state.id}</code>
       </h1>
-      <p className="session-meta muted">
-        Session: <code>{state.id}</code> · Seed: <code>{state.seed}</code>
-      </p>
       {err ? <div className="error-banner">{err}</div> : null}
 
       <div className="play-toolbar">
@@ -202,11 +203,13 @@ export function PlayGamePage() {
           Spymaster view (show hidden colors)
         </label>
         <span className="status-line">
-          Team: <strong>{state.current_team}</strong> · Phase: <strong>{state.current_phase}</strong>
+          Team: <span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team}</span> ·
+          Phase: <strong>{state.current_phase}</strong>
           {state.winner ? (
             <>
               {' '}
-              · Winner: <strong>{state.winner}</strong>
+              · Winner:{' '}
+              <span className={`history-team-tag history-team-tag--${teamSide(state.winner)}`}>{state.winner}</span>
             </>
           ) : null}
         </span>
@@ -300,7 +303,7 @@ export function PlayGamePage() {
               </thead>
               <tbody>
                 {historyRounds.map((round, i) => {
-                  const side = round.team.toUpperCase() === 'BLUE' ? 'blue' : 'red'
+                  const side = teamSide(round.team)
                   return (
                     <tr key={i} className={`history-row history-row--${side}`}>
                       <td className="history-cell history-cell--clue">
@@ -349,15 +352,14 @@ export function PlayGamePage() {
         )}
       </div>
 
-      {state.is_over ? (
-        <p>
-          <strong>Game over.</strong> <Link to="/play">New game</Link>
-        </p>
-      ) : state.ui.waiting_on_ai ? (
+      {state.ui.waiting_on_ai ? (
         <p className="status-line muted">Waiting on AI…</p>
       ) : state.ui.show_spymaster_form ? (
         <div className="action-panel">
-          <h2>Your clue ({state.current_team} spymaster)</h2>
+          <h2>
+            Your clue (<span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team}</span>{' '}
+            spymaster)
+          </h2>
           <p className="muted" style={{ marginTop: 0 }}>
             If the guesser is AI, the clue word must exist in the embedding matrix (use common English words).
           </p>
@@ -390,12 +392,20 @@ export function PlayGamePage() {
         </div>
       ) : null}
 
+      <footer className="play-footer">
+        <p className="session-meta muted">
+          Session: <code>{state.id}</code> · Seed: <code>{state.seed}</code>
+        </p>
+        {state.is_over ? <Link to="/play">New game</Link> : null}
+      </footer>
+
       {showEndModal ? (
         <div className="endgame-modal-backdrop" role="presentation">
           <section className="endgame-modal" role="dialog" aria-modal="true" aria-labelledby="endgame-modal-title">
             <h2 id="endgame-modal-title">Game over</h2>
             <p className="endgame-modal__winner">
-              <strong>{winnerTeam}</strong> wins {winnerReasonText(state.win_reason)}
+              <span className={`history-team-tag history-team-tag--${teamSide(winnerTeam)}`}>{winnerTeam}</span> wins{' '}
+              {winnerReasonText(state.win_reason)}
             </p>
             <p className="muted endgame-modal__seed">
               Replay or analyze this same game with seed <code>{state.seed}</code>.

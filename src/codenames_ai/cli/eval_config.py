@@ -44,6 +44,18 @@ class GuesserConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     extra_candidates: int = Field(default=3, ge=0, le=50)
+    sampling_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=5.0,
+        description="Softmax temperature for stochastic guess picks (0 disables sampling).",
+    )
+    sampling_top_k: int = Field(
+        default=0,
+        ge=0,
+        le=25,
+        description="Sample only from top-K ranked candidates (0 means all unrevealed cards).",
+    )
 
 
 class ScoringConfig(BaseModel):

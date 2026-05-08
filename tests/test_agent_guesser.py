@@ -304,3 +304,32 @@ class TestTraceShape:
         # Sorted by sim desc.
         sims = [c.similarity for c in trace.candidates]
         assert sims == sorted(sims, reverse=True)
+
+
+class TestSampling:
+    def test_sampling_can_pick_non_top_candidate(self):
+        matrix = _padded_matrix(
+            [
+                ("clue", [1.0, 0.0, 0.0]),
+                ("a", [1.0, 0.0, 0.0]),
+                ("b", [0.99, 0.01, 0.0]),
+                ("c", [-1.0, 0.0, 0.0]),
+            ]
+        )
+        board = make_board(
+            [
+                ("a", Color.RED, False),
+                ("b", Color.RED, False),
+                ("c", Color.BLUE, False),
+            ]
+        )
+        guesser = AIGuesser(
+            matrix,
+            risk=1.0,
+            sampling_temperature=1.0,
+            sampling_top_k=2,
+            rng=np.random.default_rng(0),
+        )
+        trace = guesser.guess(GuesserView(board=board, team=Color.RED), Clue("clue", 1))
+        assert trace.guesses[0] in {"a", "b"}
+        assert trace.guesses[0] == "b"

@@ -75,11 +75,12 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_KEY: ${{ secrets.LLM_KEY }}
         run: |
-          {
-            echo "LLM_API=${LLM_API}"
-            echo "LLM_MODEL=${LLM_MODEL}"
-            echo "LLM_KEY=${LLM_KEY}"
-          } > .env
+          cat > .env <<EOF
+          LLM_API=${LLM_API}
+          LLM_MODEL=${LLM_MODEL}
+          LLM_KEY=${LLM_KEY}
+          CODENAMES_AI_CONFIG=config/base.yaml
+          EOF
 
       - name: Copy compose file & .env to deploy host
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' ||

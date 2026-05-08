@@ -142,7 +142,13 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         reranker=spy_reranker,
         weights=spy_weights,
     )
-    guesser = AIGuesser(matrix, risk=cfg.risk, reranker=guess_reranker)
+    guesser = AIGuesser(
+        matrix,
+        risk=cfg.risk,
+        reranker=guess_reranker,
+        sampling_temperature=cfg.guesser.sampling_temperature,
+        sampling_top_k=cfg.guesser.sampling_top_k,
+    )
     return EvalRuntime(
         game_vocab=game_vocab,
         clue_vocab=clue_vocab,

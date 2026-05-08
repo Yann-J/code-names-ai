@@ -2,6 +2,10 @@
 
 A Python package that plays the word game [Code Names](https://en.wikipedia.org/wiki/Codenames) with AI agents that combine **fastText embeddings** and **LLM reranking**. Use it as a research tool in a Jupyter notebook, run headless self-play tournaments to measure bot quality, or spin up a local web UI to play against (or alongside) the AI.
 
+## Play the demo
+
+Access the AI agent at [this demo UI](https://guess.mind-it.rw/). You can assign any of the roles (spymaster or guesser from both teams) to either human or AI.
+
 ---
 
 ## How it works
@@ -357,3 +361,4 @@ The dependency graph flows one way: `game` → `agent` → `llm/embedding/vocab`
 [] Add French
 [] RL to fine-tune the clue scoring parameters
 [] Shareable URLs with real-time updates via websocket to play remotely
+[] Tune Guesser AI
