@@ -23,7 +23,7 @@ export default function App() {
         <span>View on GitHub</span>
       </a>
       <header className="app-header">
-        <strong>Code Names AI</strong>
+        <strong>Word Guess AI</strong>
         <nav className="app-nav">
           <NavLink to="/" end>Home</NavLink>
           <NavLink to="/play">New game</NavLink>
