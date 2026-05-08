@@ -1,3 +1,33 @@
+.github-corner {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 18, 26, 0.85);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+}
+
+.github-corner img {
+  width: 0.95rem;
+  height: 0.95rem;
+  filter: invert(1);
+}
+
+.github-corner:hover {
+  border-color: rgba(142, 197, 255, 0.55);
+  background: rgba(18, 27, 39, 0.95);
+}
+
 .app-header {
   display: flex;
   flex-wrap: wrap;

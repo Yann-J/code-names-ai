@@ -9,7 +9,14 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'favicon.svg'],
+      includeAssets: [
+        'icons/icon-192.png',
+        'icons/icon-512.png',
+        'favicon.svg',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+      ],
       manifest: {
         name: 'Code Names AI',
         short_name: 'CodeNamesAI',
