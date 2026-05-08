@@ -1,7 +1,7 @@
 name: codenames-ai
 
 services:
-  app:
+  guess:
     image: ${IMAGE:-ghcr.io/yann-j/code-names-ai:latest}
     build:
       context: .
