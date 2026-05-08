@@ -41,7 +41,7 @@ guesser:
   # Extra candidates passed to the guesser LLM beyond N.
   extra_candidates: 3
   # Softmax temperature for stochastic guess picks (0.0 => deterministic top-rank picks).
-  sampling_temperature: 0.0
+  sampling_temperature: 0.5
   # Restrict stochastic picks to top-K candidates (0 => all unrevealed candidates).
   sampling_top_k: 0
 
