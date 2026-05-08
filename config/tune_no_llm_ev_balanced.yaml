@@ -1,0 +1,51 @@
+# No-LLM eval config: baseline-ish EV tuning + moderate ambition.
+label: no_llm_ev_balanced
+risk: 0.65
+language: en
+
+llm_rerank: false
+
+game_zipf:
+  min: 4.0
+  max: 6.5
+clue_zipf:
+  min: 3.0
+  max: 7.0
+
+embedding_top_k: 20
+top_k_trace: 200
+blend_alpha: 0.45
+
+clue_allowed_pos:
+  - NOUN
+  - ADJ
+  - VERB
+
+game_allowed_pos:
+  - NOUN
+
+exclusions_path: data/exclusions/en.txt
+guesser_extra_candidates: 3
+
+scoring:
+  prefer_min_targets: 3
+  expected_reward_weight: 1.35
+  mc_trials: 128
+
+  # Explicit overrides (optional; set to strengthen multi-target behavior)
+  ambition_weight: 0.24
+  margin_weight: 0.16
+  undercluster_penalty_weight: 0.07
+
+  adaptive_mc_base_trials: 96
+  adaptive_mc_extra_trials: 160
+  adaptive_mc_ev_band: 0.12
+
+  lane_target_fractions: [0.16, 0.42, 0.24, 0.10, 0.05, 0.02, 0.01]
+  lane_quality_delta_ev: 0.22
+  lane_max_n: 7
+
+  # Unused with llm_rerank=false, but kept for completeness
+  ev_llm_gain: 0.40
+  ev_llm_temperature: 0.20
+

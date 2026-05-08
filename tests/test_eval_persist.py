@@ -53,6 +53,9 @@ class TestRecordsToDataFrame:
             "num_guesses",
             "correct_guesses",
             "assassin_hit",
+            "avg_clue_count",
+            "clue_rate_ge_2",
+            "clue_rate_ge_3",
         ]
 
     def test_winner_serialized_as_string(self):

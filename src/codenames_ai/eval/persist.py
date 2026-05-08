@@ -18,11 +18,14 @@ _RECORD_COLUMNS = [
     "num_guesses",
     "correct_guesses",
     "assassin_hit",
+    "avg_clue_count",
+    "clue_rate_ge_2",
+    "clue_rate_ge_3",
 ]
 
 
 def records_to_dataframe(records: Sequence[GameRecord]) -> pd.DataFrame:
-    """One row per game with summary columns. Board/history are NOT serialized."""
+    """One row per game with summary columns only."""
     rows = []
     for r in records:
         rows.append(
@@ -36,6 +39,9 @@ def records_to_dataframe(records: Sequence[GameRecord]) -> pd.DataFrame:
                 "num_guesses": r.num_guesses,
                 "correct_guesses": r.correct_guesses,
                 "assassin_hit": r.assassin_hit,
+                "avg_clue_count": r.avg_clue_count,
+                "clue_rate_ge_2": r.clue_rate_ge_2,
+                "clue_rate_ge_3": r.clue_rate_ge_3,
             }
         )
     return pd.DataFrame(rows, columns=_RECORD_COLUMNS)

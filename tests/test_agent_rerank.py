@@ -132,7 +132,7 @@ class TestSpymasterReranker:
         llm = FakeLLM(
             '{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}'
         )
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         assert llm.calls
@@ -158,7 +158,9 @@ class TestSpymasterReranker:
             }
         )
         llm = FakeLLM(rerank_response)
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.0)  # alpha=0 → only LLM
+        reranker = SpymasterReranker(
+            llm, top_k=2, blend_alpha=0.0, ev_llm_gain=0.0
+        )  # alpha=0 → only LLM
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
 
@@ -182,7 +184,7 @@ class TestSpymasterReranker:
             }
         )
         llm = FakeLLM(rerank_response)
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=1.0)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=1.0, ev_llm_gain=0.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         # Top candidate's LLM fields are populated even with alpha=1.
@@ -191,7 +193,7 @@ class TestSpymasterReranker:
     def test_missing_response_falls_back_to_embedding_score(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
         llm = FakeLLM("not json")
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         # No LLM data on chosen — fall back was triggered.
@@ -204,7 +206,7 @@ class TestSpymasterReranker:
     def test_llm_called_in_json_mode(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
         llm = FakeLLM('{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}')
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         assert llm.calls

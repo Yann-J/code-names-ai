@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class GameRecord:
-    """One game's outcome and aggregate stats, derivable from `final_state` alone.
+    """One game outcome and summary stats from `final_state`.
 
     Designed to round-trip through parquet without keeping the full board /
     history in row form (those live in `final_state` for in-memory inspection).
@@ -38,15 +38,19 @@ class GameRecord:
 
     @property
     def num_clues(self) -> int:
-        return sum(1 for ev in self.final_state.turn_history if ev.kind == "CLUE")
+        return sum(
+            1 for ev in self.final_state.turn_history if ev.kind == "CLUE"
+        )
 
     @property
     def num_guesses(self) -> int:
-        return sum(1 for ev in self.final_state.turn_history if ev.kind == "GUESS")
+        return sum(
+            1 for ev in self.final_state.turn_history if ev.kind == "GUESS"
+        )
 
     @property
     def correct_guesses(self) -> int:
-        """Guesses where the revealed color matched the guessing team's own color."""
+        """Guesses where outcome color matches the guessing team's color."""
         return sum(
             1
             for ev in self.final_state.turn_history
@@ -59,6 +63,35 @@ class GameRecord:
             ev.kind == "GUESS" and ev.outcome_color == Color.ASSASSIN
             for ev in self.final_state.turn_history
         )
+
+    @property
+    def clue_counts(self) -> tuple[int, ...]:
+        return tuple(
+            int(ev.clue.count)
+            for ev in self.final_state.turn_history
+            if ev.kind == "CLUE" and ev.clue is not None
+        )
+
+    @property
+    def avg_clue_count(self) -> float:
+        counts = self.clue_counts
+        if not counts:
+            return 0.0
+        return sum(counts) / len(counts)
+
+    @property
+    def clue_rate_ge_2(self) -> float:
+        counts = self.clue_counts
+        if not counts:
+            return 0.0
+        return sum(1 for c in counts if c >= 2) / len(counts)
+
+    @property
+    def clue_rate_ge_3(self) -> float:
+        counts = self.clue_counts
+        if not counts:
+            return 0.0
+        return sum(1 for c in counts if c >= 3) / len(counts)
 
 
 def run_tournament(
@@ -73,7 +106,7 @@ def run_tournament(
     label: str = "",
     config_hash: str = "",
 ) -> list[GameRecord]:
-    """Run a sequence of full self-play games and collect a `GameRecord` per game.
+    """Run a sequence of full self-play games.
 
     Players are reused across games — they're expected to be stateless between
     `give_clue` / `guess` calls, which both `AISpymaster` and `AIGuesser` are.

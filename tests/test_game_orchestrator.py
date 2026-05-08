@@ -34,6 +34,8 @@ def _candidate(clue: str, n: int) -> Candidate:
         freq_bonus=0.0,
         assassin_penalty=0.0,
         opponent_penalty=0.0,
+        expected_reward_bonus=0.0,
+        expected_reward_raw=0.0,
     )
     return Candidate(
         clue=clue,

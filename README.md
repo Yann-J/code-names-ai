@@ -36,8 +36,9 @@ Every word in the clue vocabulary is projected through a **fastText model** (`cc
    ```
 
 1. Filter for legal clues (drop clues too close to a game word, or offensive words from a simple blacklist dictionary)
-1. Pass the top-K candidates to an **LLM** (any OpenAI-compatible endpoint) for scoring with a one-sentence reason, in order to capture subtle word connections that wouldn't be surfaced by the pure embeddings.
-1. Blend: `α × normalised_embedding_score + (1−α) × llm_score`.
+1. Build a lane-balanced shortlist for LLM rerank (target fractions across clue counts `N=1..7`, EV-first ranking within each lane, quality gate + graceful backfill).
+1. Pass the shortlist to an **LLM** (any OpenAI-compatible endpoint) for scoring with a one-sentence reason, in order to capture subtle word connections that pure embeddings miss.
+1. Blend with EV-aware LLM adjustment: `α × normalised_embedding_score + (1−α) × llm_adjusted`, where `llm_adjusted` is boosted or damped by expected reward relative to shortlist median EV.
 
 ### Guesser agent
 
@@ -140,17 +141,25 @@ Create a YAML config file (see all defaults below):
 ```yaml
 label: baseline
 risk: 0.5
-language: en
-llm_rerank: true   # set false to skip LLM and use embedding-only agents
-game_zipf:
-  min: 4.0
-  max: 6.5
-clue_zipf:
-  min: 3.0
-  max: 7.0
+vocabulary:
+  language: en
+  game:
+    zipf: {min: 4.0, max: 6.5}
+    allowed_pos: [NOUN]
+  clue:
+    zipf: {min: 3.0, max: 7.0}
+    allowed_pos: [NOUN, ADJ, VERB]
 embedding_top_k: 20    # top embedding candidates sent to the spymaster LLM
 top_k_trace: 200       # how many ranked candidates to keep in the trace / API
-blend_alpha: 0.5
+scoring:
+  llm_rerank: true   # set false to skip LLM and use embedding-only agents
+  blend_alpha: 0.5
+  lane_target_fractions: [0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01]
+  adaptive_mc_base_trials: 64
+  adaptive_mc_extra_trials: 96
+  adaptive_mc_ev_band: 0.10
+  ev_llm_gain: 0.35
+  ev_llm_temperature: 0.20
 ```
 
 Run a 20-game tournament:
@@ -175,20 +184,59 @@ Use `--embedding-only` to override `llm_rerank` in YAML and run without any LLM 
 |---|---|---|
 | `label` | `"default"` | Name shown in comparison table and stored in parquet |
 | `risk` | `0.5` | Risk knob 0–1 |
-| `language` | `"en"` | Language code |
-| `game_zipf` | `{min: 4.0, max: 6.5}` | Frequency window for board-card vocabulary (nested `min` / `max`) |
-| `clue_zipf` | `{min: 3.0, max: 7.0}` | Frequency window for clue vocabulary (nested `min` / `max`) |
-| `game_allowed_pos` | `["NOUN"]` | spaCy POS tags kept for game words |
-| `clue_allowed_pos` | `["NOUN", "ADJ", "VERB"]` | spaCy POS tags kept for clues |
+| `vocabulary` | object | Vocabulary filters (language + Zipf/POS for game/clue vocabularies) |
 | `exclusions_path` | `null` | Path to a one-word-per-line exclusion file |
 | `top_k_trace` | `200` | How many candidates to surface in the `SpymasterTrace` after rerank |
-| `llm_rerank` | `true` | Enable LLM reranking step |
 | `embedding_top_k` | `20` | Top embedding-scored candidates sent to the spymaster LLM |
-| `blend_alpha` | `0.5` | α in `α·embedding + (1−α)·llm` blend |
-| `guesser_extra_candidates` | `3` | Extra candidates passed to the guesser LLM beyond N |
-| `prefer_min_targets` | `3` | Soft minimum friendly count each clue should aim for |
+| `guesser` | object | Guesser config block |
+| `scoring` | object | Top-level scoring config block (see keys below) |
 
-Deprecated YAML keys (still accepted): `game_zipf_min` / `game_zipf_max` → `game_zipf`, `clue_zipf_min` / `clue_zipf_max` → `clue_zipf`, and `rerank_top_k` → `embedding_top_k`.
+`scoring` block keys:
+
+| Key | Default | Description |
+|---|---|---|
+| `llm_rerank` | `true` | Enable LLM reranking step |
+| `blend_alpha` | `0.5` | α in `α·embedding + (1−α)·llm` blend |
+| `prefer_min_targets` | `3` | Soft minimum friendly count each clue should aim for |
+| `expected_reward_weight` | `1.10` | Weight of Monte Carlo EV term in embedding score |
+| `mc_trials` | `96` | Baseline Monte Carlo trials per `(clue, N)` |
+| `adaptive_mc_base_trials` | `64` | Base EV trials used before adaptive refinement |
+| `adaptive_mc_extra_trials` | `96` | Extra EV trials for near-top lane candidates |
+| `adaptive_mc_ev_band` | `0.10` | EV distance to lane leader that triggers extra trials |
+| `lane_target_fractions` | `[0.18,0.42,0.22,0.10,0.05,0.02,0.01]` | Shortlist target fractions for clue-count lanes `N=1..7` |
+| `lane_quality_delta_ev` | `0.20` | Keep lane entries within this EV delta of lane best before backfill |
+| `lane_max_n` | `7` | Highest lane index; larger counts are bucketed into this lane |
+| `ev_llm_gain` | `0.35` | Strength of EV modulation applied to LLM score in spymaster rerank |
+| `ev_llm_temperature` | `0.20` | Temperature for EV→LLM modulation smoothness |
+| `ambition_weight` | `null` | Optional override for ambition bonus weight |
+| `margin_weight` | `null` | Optional override for margin bonus weight |
+| `freq_weight` | `null` | Optional override for frequency bonus weight |
+| `assassin_weight` | `null` | Optional override for assassin penalty weight |
+| `opponent_weight` | `null` | Optional override for opponent penalty weight |
+| `undercluster_penalty_weight` | `null` | Optional override for undercluster penalty weight |
+| `margin_floor` | `null` | Optional override for hard margin veto floor |
+| `assassin_ceiling` | `null` | Optional override for hard assassin veto ceiling |
+| `mc_temperature` | `null` | Optional override for MC pick softmax temperature |
+| `reward_friendly` | `null` | Optional override for friendly reward in MC rollout |
+| `reward_neutral` | `null` | Optional override for neutral reward in MC rollout |
+| `reward_opponent` | `null` | Optional override for opponent reward in MC rollout |
+| `reward_assassin` | `null` | Optional override for assassin reward in MC rollout |
+
+`vocabulary` block keys:
+
+| Key | Default | Description |
+|---|---|---|
+| `language` | `"en"` | Language code |
+| `game.zipf` | `{min: 4.0, max: 6.5}` | Frequency window for board-card vocabulary |
+| `game.allowed_pos` | `["NOUN"]` | spaCy POS tags kept for game words |
+| `clue.zipf` | `{min: 3.0, max: 7.0}` | Frequency window for clue vocabulary |
+| `clue.allowed_pos` | `["NOUN", "ADJ", "VERB"]` | spaCy POS tags kept for clues |
+
+`guesser` block keys:
+
+| Key | Default | Description |
+|---|---|---|
+| `extra_candidates` | `3` | Extra candidates passed to the guesser LLM beyond N |
 
 ### Web UI
 

@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 from codenames_ai.eval.metrics import aggregate, compare
 from codenames_ai.eval.tournament import GameRecord
 from codenames_ai.game.models import Board, Card, Color
@@ -106,10 +104,26 @@ class TestAggregateBasic:
         assert out["avg_guesses_per_clue"] == 3.0
         assert out["accuracy"] == 2 / 3
 
+    def test_clue_ambition_metrics(self):
+        from codenames_ai.game.models import Clue
+
+        history = (
+            TurnEvent(team=Color.RED, kind="CLUE", clue=Clue("c1", 1)),
+            TurnEvent(team=Color.BLUE, kind="CLUE", clue=Clue("c2", 2)),
+            TurnEvent(team=Color.RED, kind="CLUE", clue=Clue("c3", 3)),
+        )
+        out = aggregate([_record(history=history)])
+        assert out["avg_clue_count"] == 2.0
+        assert out["clue_rate_ge_2"] == 2 / 3
+        assert out["clue_rate_ge_3"] == 1 / 3
+
 
 class TestCompare:
     def test_one_row_per_label(self):
-        a = [_record(winner=Color.RED, label="A"), _record(winner=Color.BLUE, label="A")]
+        a = [
+            _record(winner=Color.RED, label="A"),
+            _record(winner=Color.BLUE, label="A"),
+        ]
         b = [_record(winner=Color.RED, label="B")]
         rows = compare({"A": a, "B": b})
         labels = sorted(r["label"] for r in rows)

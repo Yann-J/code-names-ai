@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -239,7 +239,9 @@ class AISpymaster(Spymaster):
             # blended scores live in [0, 1], so they aren't comparable, and
             # a non-shortlisted candidate "winning" by embedding score alone
             # would defeat the purpose of asking the LLM.
-            shortlist = candidates[: self.reranker.top_k]
+            shortlist = self._build_rerank_shortlist(
+                candidates, top_k=self.reranker.top_k
+            )
             candidates = list(self.reranker.rerank(shortlist, view))
             candidates.sort(key=lambda c: c.score, reverse=True)
 
@@ -293,6 +295,91 @@ class AISpymaster(Spymaster):
             illegal_count=illegal_count,
         )
 
+    def _build_rerank_shortlist(
+        self, candidates: list[Candidate], *, top_k: int
+    ) -> list[Candidate]:
+        """Build EV-first lane-balanced shortlist for LLM rerank."""
+        if not candidates or top_k <= 0:
+            return []
+
+        w = self.weights
+        max_lane = max(1, int(w.lane_max_n))
+        lane_fracs = tuple(float(x) for x in w.lane_target_fractions[:max_lane])
+        if len(lane_fracs) < max_lane:
+            lane_fracs = lane_fracs + (0.0,) * (max_lane - len(lane_fracs))
+        frac_sum = sum(max(0.0, x) for x in lane_fracs)
+        if frac_sum <= 0.0:
+            lane_fracs = tuple(
+                1.0 / max_lane for _ in range(max_lane)
+            )
+        else:
+            lane_fracs = tuple(max(0.0, x) / frac_sum for x in lane_fracs)
+
+        lane_bins: dict[int, list[Candidate]] = {i: [] for i in range(1, max_lane + 1)}
+        for cand in candidates:
+            lane = min(max_lane, max(1, int(cand.n)))
+            lane_bins[lane].append(cand)
+        for lane in lane_bins:
+            lane_bins[lane].sort(
+                key=lambda c: (
+                    c.components.expected_reward_raw,
+                    c.embedding_score,
+                    c.margin,
+                ),
+                reverse=True,
+            )
+
+        raw_targets = [f * top_k for f in lane_fracs]
+        target_counts = [int(v) for v in raw_targets]
+        used = sum(target_counts)
+        if used < top_k:
+            remainders = sorted(
+                ((raw_targets[i] - target_counts[i], i) for i in range(max_lane)),
+                reverse=True,
+            )
+            for _, idx in remainders[: top_k - used]:
+                target_counts[idx] += 1
+
+        chosen: list[Candidate] = []
+        chosen_keys: set[tuple[str, int]] = set()
+        for lane in range(1, max_lane + 1):
+            lane_candidates = lane_bins[lane]
+            if not lane_candidates:
+                continue
+            lane_best_ev = lane_candidates[0].components.expected_reward_raw
+            gate = lane_best_ev - float(w.lane_quality_delta_ev)
+            for cand in lane_candidates:
+                if len(chosen) >= top_k or target_counts[lane - 1] <= 0:
+                    break
+                key = (cand.clue, cand.n)
+                if key in chosen_keys:
+                    continue
+                if cand.components.expected_reward_raw < gate:
+                    continue
+                chosen.append(cand)
+                chosen_keys.add(key)
+                target_counts[lane - 1] -= 1
+
+        if len(chosen) < top_k:
+            backfill = sorted(
+                candidates,
+                key=lambda c: (
+                    c.components.expected_reward_raw,
+                    c.embedding_score,
+                    c.margin,
+                ),
+                reverse=True,
+            )
+            for cand in backfill:
+                if len(chosen) >= top_k:
+                    break
+                key = (cand.clue, cand.n)
+                if key in chosen_keys:
+                    continue
+                chosen.append(cand)
+                chosen_keys.add(key)
+        return chosen[:top_k]
+
     def _validate_board(self, active: list[Card]) -> None:
         missing = [c.word for c in active if c.word not in self.matrix]
         if missing:
@@ -328,6 +415,7 @@ class AISpymaster(Spymaster):
         veto_count = 0
         illegal_count = 0
 
+        seeds: dict[tuple[str, int], int] = {}
         for i in range(len(clue_idx.surfaces)):
             surface = clue_idx.surfaces[i]
             lemma = clue_idx.lemmas[i]
@@ -364,12 +452,14 @@ class AISpymaster(Spymaster):
                 fb = freq_bonus(zipf, weights.freq_weight)
                 assassin_penalty = weights.assassin_weight * max(assassin_sim, 0.0)
                 opponent_penalty = weights.opponent_weight * max(opp_sim, 0.0)
+                seed = (i + 1) * 1009 + n * 9173
                 exp_reward_raw = self._estimate_expected_reward(
                     similarities=row_all,
                     active_cards=active_cards,
                     team=team,
                     n=n,
-                    seed=(i + 1) * 1009 + n * 9173,
+                    seed=seed,
+                    trials=weights.adaptive_mc_base_trials,
                 )
                 exp_reward_bonus = weights.expected_reward_weight * exp_reward_raw
                 floor_n = min(weights.prefer_min_targets, F)
@@ -402,8 +492,73 @@ class AISpymaster(Spymaster):
                         zipf=zipf,
                     )
                 )
-
+                seeds[(surface, n)] = seed
+        if candidates and self.weights.adaptive_mc_extra_trials > 0:
+            candidates = self._refine_mc_estimates(
+                candidates=candidates,
+                seeds=seeds,
+                similarities_by_clue={
+                    clue_idx.surfaces[i]: sim_all[i] for i in range(len(clue_idx.surfaces))
+                },
+                active_cards=active_cards,
+                team=team,
+            )
         return candidates, veto_count, illegal_count
+
+    def _refine_mc_estimates(
+        self,
+        *,
+        candidates: list[Candidate],
+        seeds: dict[tuple[str, int], int],
+        similarities_by_clue: dict[str, np.ndarray],
+        active_cards: list[Card],
+        team: Color,
+    ) -> list[Candidate]:
+        """Run extra MC trials for candidates close to lane EV leaders."""
+        w = self.weights
+        max_lane = max(1, int(w.lane_max_n))
+        out = list(candidates)
+        lane_best: dict[int, float] = {}
+        for cand in out:
+            lane = min(max_lane, max(1, int(cand.n)))
+            lane_best[lane] = max(
+                lane_best.get(lane, float("-inf")),
+                cand.components.expected_reward_raw,
+            )
+        for idx, cand in enumerate(out):
+            lane = min(max_lane, max(1, int(cand.n)))
+            best = lane_best.get(lane, float("-inf"))
+            if best - cand.components.expected_reward_raw > w.adaptive_mc_ev_band:
+                continue
+            sims = similarities_by_clue.get(cand.clue)
+            seed = seeds.get((cand.clue, cand.n))
+            if sims is None or seed is None:
+                continue
+            extra_ev = self._estimate_expected_reward(
+                similarities=sims,
+                active_cards=active_cards,
+                team=team,
+                n=cand.n,
+                seed=seed + 37,
+                trials=w.adaptive_mc_extra_trials,
+            )
+            base_trials = max(1, int(w.adaptive_mc_base_trials))
+            extra_trials = max(1, int(w.adaptive_mc_extra_trials))
+            blended_ev = (
+                cand.components.expected_reward_raw * base_trials + extra_ev * extra_trials
+            ) / float(base_trials + extra_trials)
+            new_components = replace(
+                cand.components,
+                expected_reward_raw=blended_ev,
+                expected_reward_bonus=w.expected_reward_weight * blended_ev,
+            )
+            out[idx] = replace(
+                cand,
+                components=new_components,
+                embedding_score=new_components.total,
+                score=new_components.total,
+            )
+        return out
 
     def _estimate_expected_reward(
         self,
@@ -413,6 +568,7 @@ class AISpymaster(Spymaster):
         team: Color,
         n: int,
         seed: int,
+        trials: int | None = None,
     ) -> float:
         """Estimate expected clue value with Monte Carlo rollout of guesses.
 
@@ -424,7 +580,7 @@ class AISpymaster(Spymaster):
             return 0.0
         temp = max(1e-3, float(w.mc_temperature))
         sims = similarities.astype(np.float64)
-        trials = max(1, int(w.mc_trials))
+        trials = max(1, int(trials if trials is not None else w.mc_trials))
         rng = np.random.default_rng(seed)
         opp = team.opponent()
         rewards = {

@@ -26,6 +26,9 @@ def aggregate(records: Sequence[GameRecord]) -> dict[str, float]:
             "avg_guesses": 0.0,
             "avg_guesses_per_clue": 0.0,
             "accuracy": 0.0,
+            "avg_clue_count": 0.0,
+            "clue_rate_ge_2": 0.0,
+            "clue_rate_ge_3": 0.0,
         }
 
     total_clues = sum(r.num_clues for r in records)
@@ -42,6 +45,13 @@ def aggregate(records: Sequence[GameRecord]) -> dict[str, float]:
         "avg_guesses": total_guesses / n,
         "avg_guesses_per_clue": (total_guesses / total_clues) if total_clues else 0.0,
         "accuracy": (total_correct / total_guesses) if total_guesses else 0.0,
+        "avg_clue_count": sum(r.avg_clue_count for r in records) / n,
+        "clue_rate_ge_2": (
+            sum(r.clue_rate_ge_2 for r in records) / n
+        ),
+        "clue_rate_ge_3": (
+            sum(r.clue_rate_ge_3 for r in records) / n
+        ),
     }
 
 

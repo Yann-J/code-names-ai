@@ -12,7 +12,7 @@ from starlette.templating import Jinja2Templates
 from codenames_ai.agent.interfaces import NoLegalClueError
 from codenames_ai.agent.scoring import ScoringWeights
 from codenames_ai.agent.trace import SpymasterTrace
-from codenames_ai.cli.eval_config import EvalAgentConfigFile
+from codenames_ai.cli.eval_config import EvalAgentConfigFile, ScoringConfig
 from codenames_ai.cli.runtime import EvalRuntime, build_eval_runtime
 from codenames_ai.config import Config
 from codenames_ai.game.board import generate_board
@@ -44,7 +44,7 @@ def create_app(
 ) -> FastAPI:
     """Serve the UI. Optionally pass YAML-loaded `EvalAgentConfigFile` (--config).
 
-    With no agent config: embedding-only agents (``llm_rerank=False``), same as before.
+    With no agent config: embedding-only agents (``scoring.llm_rerank=False``), same as before.
     Form ``risk`` still overrides YAML ``risk`` per session.
 
     Pass ``session_store`` to swap the in-memory default for a custom
@@ -53,7 +53,9 @@ def create_app(
 
     def cfg_at_risk(risk: float) -> EvalAgentConfigFile:
         if agent_config is None:
-            return EvalAgentConfigFile(label="web", llm_rerank=False, risk=risk)
+            return EvalAgentConfigFile(
+                label="web", scoring=ScoringConfig(llm_rerank=False), risk=risk
+            )
         return agent_config.model_copy(update={"risk": risk})
 
     @lru_cache(maxsize=32)

@@ -34,7 +34,7 @@ class ScoringWeights:
     """Penalty multiplier on the worst (max) opponent-card similarity."""
 
     prefer_min_targets: int
-    """Soft floor on friendly count each clue should cover (if that many exist)."""
+    """Soft floor on clue target count (bounded by friendlies left)."""
 
     undercluster_penalty_weight: float
     """Penalty per target below ``min(prefer_min_targets, F)``."""
@@ -54,11 +54,30 @@ class ScoringWeights:
     reward_assassin: float
     """Per-pick rewards used by Monte Carlo simulation."""
 
+    lane_target_fractions: tuple[float, ...]
+    """Target shortlist fractions by clue count lane ``N=1..7``."""
+
+    lane_quality_delta_ev: float
+    """Keep lane candidates whose EV is within this delta of lane best."""
+
+    lane_max_n: int
+    """Maximum lane index. Larger N values are bucketed into this lane."""
+
+    adaptive_mc_base_trials: int
+    """Base Monte Carlo trials before adaptive refinement."""
+
+    adaptive_mc_extra_trials: int
+    """Extra Monte Carlo trials for candidates near lane EV leaders."""
+
+    adaptive_mc_ev_band: float
+    """EV distance to lane best that triggers extra trials."""
+
     @classmethod
     def from_risk(cls, risk: float) -> "ScoringWeights":
         """Map a single `risk` scalar in [0, 1] to a weight set.
 
-        risk = 0 → cautious: high margins, low ambition, strong assassin penalties.
+        risk = 0 → cautious: high margins, low ambition,
+        strong assassin penalties.
         risk = 1 → aggressive: thin margins, ambition rewarded.
         """
         r = max(0.0, min(1.0, float(risk)))
@@ -79,6 +98,12 @@ class ScoringWeights:
             reward_neutral=-0.35,
             reward_opponent=-0.8,
             reward_assassin=-3.0,
+            lane_target_fractions=(0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01),
+            lane_quality_delta_ev=0.20,
+            lane_max_n=7,
+            adaptive_mc_base_trials=64,
+            adaptive_mc_extra_trials=96,
+            adaptive_mc_ev_band=0.10,
         )
 
 

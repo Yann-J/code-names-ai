@@ -182,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument(
         "--embedding-only",
         action="store_true",
-        help="Ignore llm_rerank in YAML and run embedding-only agents",
+        help="Ignore scoring.llm_rerank in YAML and run embedding-only agents",
     )
     ev.add_argument(
         "--max-clues",

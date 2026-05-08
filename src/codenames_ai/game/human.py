@@ -15,7 +15,7 @@ def trivial_spymaster_trace(
 ) -> SpymasterTrace:
     """Build a minimal trace for a human-chosen legal clue (notebook / web hook-in)."""
     w = weights or ScoringWeights.from_risk(0.5)
-    z = ScoreComponents(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    z = ScoreComponents(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     cand = Candidate(
         clue=clue,
         targets=targets,

@@ -7,21 +7,26 @@ label: baseline
 # Risk 0–1: cautious ↔ aggressive (margin vetoes, ambition, assassin weight, guesser stop policy).
 risk: 0.6
 
-# Language code for vocab + fastText model (e.g. en → cc.en.300.bin).
-language: en
+# Vocabulary filters + language selection.
+vocabulary:
+  # Language code for vocab + fastText model (e.g. en → cc.en.300.bin).
+  language: en
 
-# If true, blend embedding scores with LLM rerank for spymaster + guesser (requires LLM_KEY).
-llm_rerank: true
+  # Board-card word frequency window (Zipf); tighter band → more “everyday” words on the grid.
+  game:
+    zipf:
+      min: 4.0
+      max: 6.5
+    # spaCy coarse POS tags allowed in the game cards
+    allowed_pos: [NOUN]
 
-# Board-card word frequency window (Zipf); tighter band → more “everyday” words on the grid.
-game_zipf:
-  min: 4.0
-  max: 6.5
-
-# Clue vocabulary frequency window (Zipf); usually wider than game_zipf so clues stay expressive.
-clue_zipf:
-  min: 3.0
-  max: 7.0
+  # Clue vocabulary frequency window (Zipf); usually wider than game.zipf so clues stay expressive.
+  clue:
+    zipf:
+      min: 3.0
+      max: 7.0
+    # spaCy coarse POS tags allowed in the clue pool
+    allowed_pos: [NOUN, ADJ, VERB]
 
 # After embedding scoring: how many top candidates are sent to the spymaster LLM reranker.
 embedding_top_k: 20
@@ -29,30 +34,44 @@ embedding_top_k: 20
 # How many ranked (clue, N, targets) candidates to keep in traces / Analysis API after rerank.
 top_k_trace: 200
 
-# Blend weight α in final score: α·normalized_embedding + (1−α)·LLM score (higher α = trust embeddings more).
-blend_alpha: 0.45
-
-# spaCy coarse POS tags allowed in the clue pool (game words default to NOUN only if unset elsewhere).
-clue_allowed_pos:
-  - NOUN
-  - ADJ
-  - VERB
-
-# spaCy coarse POS tags allowed in the game cards
-game_allowed_pos:
-  - NOUN
-
 # path to a one-word-per-line exclusion file
 exclusions_path: data/exclusions/en.txt
 
-# extra candidates passed to the guesser LLM beyond N
-guesser_extra_candidates: 3
+guesser:
+  # extra candidates passed to the guesser LLM beyond N
+  extra_candidates: 3
 
-# soft min targets per clue (capped by friendlies on board)
-prefer_min_targets: 3
+scoring:
+  # If true, blend embedding scores with LLM rerank for spymaster + guesser (requires LLM_KEY).
+  llm_rerank: true
 
-# Monte Carlo expected reward term in spymaster scoring (higher => stronger EV optimization)
-expected_reward_weight: 1.35
+  # Blend weight α in final score: α·normalized_embedding + (1−α)·LLM score (higher α = trust embeddings more).
+  blend_alpha: 0.45
 
-# Rollouts per (clue, N) candidate used to estimate expected reward
-mc_trials: 128
+  # soft min targets per clue (capped by friendlies on board)
+  prefer_min_targets: 3
+
+  # Monte Carlo expected reward term in spymaster scoring (higher => stronger EV optimization)
+  expected_reward_weight: 1.35
+
+  # Rollouts per (clue, N) candidate used to estimate expected reward
+  mc_trials: 128
+
+  # Optional explicit scoring overrides (if omitted, derived from risk)
+  ambition_weight: 0.22
+  margin_weight: 0.18
+  undercluster_penalty_weight: 0.08
+
+  # Adaptive EV estimation: run more trials for near-best lane contenders
+  adaptive_mc_base_trials: 96
+  adaptive_mc_extra_trials: 160
+  adaptive_mc_ev_band: 0.12
+
+  # Lane targets for N=1..7 shortlist construction (normalized internally)
+  lane_target_fractions: [0.16, 0.42, 0.24, 0.10, 0.05, 0.02, 0.01]
+  lane_quality_delta_ev: 0.22
+  lane_max_n: 7
+
+  # EV-modulated LLM rerank: llm_adj = llm * (1 + gain * tanh((ev - median_ev)/temperature))
+  ev_llm_gain: 0.40
+  ev_llm_temperature: 0.20
