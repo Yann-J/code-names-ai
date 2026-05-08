@@ -10,6 +10,17 @@ def _default_cache_dir() -> Path:
     return Path.home() / ".cache" / "codenames_ai"
 
 
+def _default_env_file() -> str:
+    """
+    Resolve the repo-local `.env` reliably.
+
+    `pydantic-settings` treats `env_file` as a filesystem path; using an
+    absolute path avoids surprises when the process working directory differs.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    return str(repo_root / ".env")
+
+
 class Config(BaseSettings):
     """Top-level application config.
 
@@ -20,7 +31,7 @@ class Config(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CODENAMES_AI_",
-        env_file=".env",
+        env_file=_default_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,

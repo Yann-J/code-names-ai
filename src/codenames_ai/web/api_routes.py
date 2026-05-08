@@ -180,28 +180,33 @@ def api_end_guess_turn(
 
 @api_router.post("/analysis", response_model=AnalysisResponse)
 def api_analysis(body: AnalysisRequestBody, get_runtime: RuntimeDep) -> AnalysisResponse:
+    def _compute_trace(team: Color) -> SpymasterTrace:
+        try:
+            return rt.spymaster.give_clue(SpymasterView(board=board, team=team))
+        except NoLegalClueError:
+            return SpymasterTrace(
+                chosen=None,
+                top_candidates=(),
+                weights=ScoringWeights.from_risk(body.risk),
+                veto_count=0,
+                illegal_count=0,
+            )
+
     rt = get_runtime(body.risk)
     if len(rt.game_vocab) < 25:
         raise HTTPException(status_code=503, detail="Game vocabulary too small — build caches first.")
     board = generate_board(rt.game_vocab, seed=body.seed)
-    try:
-        trace = rt.spymaster.give_clue(SpymasterView(board=board, team=board.first_team))
-    except NoLegalClueError:
-        trace = SpymasterTrace(
-            chosen=None,
-            top_candidates=(),
-            weights=ScoringWeights.from_risk(body.risk),
-            veto_count=0,
-            illegal_count=0,
-        )
-    trace_payload = spymaster_trace_to_payload(trace)
+    traces_payload = {
+        Color.RED.value: spymaster_trace_to_payload(_compute_trace(Color.RED)),
+        Color.BLUE.value: spymaster_trace_to_payload(_compute_trace(Color.BLUE)),
+    }
     board_payload = [
         AnalysisBoardCard(word=c.word, color=c.color.value.lower()) for c in board.cards
     ]
     return AnalysisResponse(
         seed=body.seed,
         risk=body.risk,
-        trace=trace_payload,
+        traces=traces_payload,
         board=board_payload,
         first_team=board.first_team.value,
     )

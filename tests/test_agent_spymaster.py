@@ -12,7 +12,7 @@ import pytest
 
 from codenames_ai.agent.interfaces import NoLegalClueError
 from codenames_ai.agent.scoring import ScoringWeights
-from codenames_ai.agent.spymaster import AISpymaster
+from codenames_ai.agent.spymaster import AISpymaster, _ClueIndex
 from codenames_ai.embedding.matrix import EmbeddingMatrix
 from codenames_ai.game.models import Board, Card, Color, SpymasterView
 from codenames_ai.vocab.models import Vocabulary, VocabConfig
@@ -137,6 +137,22 @@ class TestBasicBehavior:
 
         scores = [c.score for c in trace.top_candidates]
         assert scores == sorted(scores, reverse=True)
+
+    def test_top_candidates_unique_clue_surfaces(self):
+        entries, _, _ = _basic_setup(
+            extra_clues=[("good_clue", [1.0, 0.0], 5.0)]
+        )
+        matrix, vocab = make_setup(entries)
+        board = make_board(
+            friendly=_board_words("f", 9),
+            opponent=_board_words("o", 8),
+            neutral=_board_words("n", 7),
+            assassin="ass",
+        )
+        spymaster = AISpymaster(matrix, vocab, risk=0.5)
+        trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
+        clues = [c.clue for c in trace.top_candidates]
+        assert len(clues) == len(set(clues))
 
     def test_targets_match_top_friendlies(self):
         entries, _, _ = _basic_setup(
@@ -301,6 +317,41 @@ class TestExplicitWeightOverride:
         matrix, vocab = make_setup(entries)
         spymaster = AISpymaster(matrix, vocab, risk=0.0, weights=weights)
         assert spymaster.weights == weights
+
+
+class TestClueIndexDedupe:
+    def test_collapses_duplicate_vocab_surfaces(self):
+        """Vocab rows can repeat the same clue surface (e.g. POS paths); index once."""
+        z = 5.0
+        entries: list[tuple[str, list[float], float]] = []
+        for i in range(9):
+            entries.append((f"f{i}", [1.0, 0.01 * i], z))
+        for i in range(8):
+            entries.append((f"o{i}", [-1.0, 0.01 * i], z))
+        for i in range(7):
+            entries.append((f"n{i}", [-1.0, 0.5 + 0.01 * i], z))
+        entries.append(("ass", [-1.0, -0.3], z))
+        entries.append(("dupclue", [1.0, 0.0], z))
+        matrix, _ = make_setup(entries)
+        cfg = VocabConfig(
+            language="en",
+            zipf_min=3.0,
+            zipf_max=7.0,
+            allowed_pos=frozenset({"NOUN"}),
+        )
+        df = pd.DataFrame(
+            [
+                {"surface": "dupclue", "lemma": "a", "zipf": 4.0, "pos": "NOUN"},
+                {"surface": "dupclue", "lemma": "b", "zipf": 6.5, "pos": "NOUN"},
+                {"surface": "otherclue", "lemma": "c", "zipf": 5.0, "pos": "NOUN"},
+            ]
+        )
+        vocab = Vocabulary(config=cfg, df=df)
+        idx = _ClueIndex.build(vocab, matrix)
+        assert idx.surfaces.count("dupclue") == 1
+        i = idx.surfaces.index("dupclue")
+        assert idx.zipfs[i] == pytest.approx(6.5)
+        assert idx.lemmas[i] == "b"
 
 
 class TestComponentsBalance:

@@ -43,6 +43,14 @@ class TestScoringWeightsFromRisk:
         # ambition_weight monotonically increases with risk
         assert cautious.ambition_weight <= mid.ambition_weight <= aggressive.ambition_weight
 
+    def test_undercluster_penalty_weight_decreases_with_risk(self):
+        cautious = ScoringWeights.from_risk(0.0)
+        aggressive = ScoringWeights.from_risk(1.0)
+        assert cautious.undercluster_penalty_weight >= aggressive.undercluster_penalty_weight
+
+    def test_prefer_min_targets_is_three(self):
+        assert ScoringWeights.from_risk(0.5).prefer_min_targets == 3
+
 
 class TestFreqBonus:
     def test_zero_at_zipf_3(self):

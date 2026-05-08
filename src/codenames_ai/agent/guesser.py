@@ -66,6 +66,22 @@ class AIGuesser(Guesser):
             for rank, i in enumerate(order)
         ]
 
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "guesser embedding ranking: clue=%r count=%s (%d unrevealed cards), "
+                "cosine sim descending:",
+                clue.word,
+                clue.count,
+                len(active),
+            )
+            for cand in ranked:
+                logger.debug(
+                    "  emb rank %d %r cosine=%.6f",
+                    cand.rank,
+                    cand.word,
+                    cand.similarity,
+                )
+
         if self.reranker is not None:
             ranked = list(self.reranker.rerank(ranked, view, clue))
             ranked.sort(key=lambda c: c.score, reverse=True)
@@ -83,6 +99,28 @@ class AIGuesser(Guesser):
                 )
                 for new_rank, c in enumerate(ranked)
             ]
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "guesser ranking after rerank: %d cards by blended score:",
+                    len(ranked),
+                )
+                for cand in ranked:
+                    llm = (
+                        f"{cand.llm_score:.4f}"
+                        if cand.llm_score is not None
+                        else "—"
+                    )
+                    reason = (cand.llm_reason or "").strip()
+                    tail = f" | {reason}" if reason else ""
+                    logger.debug(
+                        "  rank %d %r blend=%.6f cosine=%.6f llm=%s%s",
+                        cand.rank,
+                        cand.word,
+                        cand.score,
+                        cand.similarity,
+                        llm,
+                        tail,
+                    )
 
         guesses, bonus_attempted, stop_reason = self._apply_stop_policy(ranked, clue.count)
         return GuesserTrace(

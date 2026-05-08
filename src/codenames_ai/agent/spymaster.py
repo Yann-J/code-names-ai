@@ -19,6 +19,27 @@ logger = logging.getLogger(__name__)
 _NEG_INF = float("-inf")
 
 
+def _dedupe_candidates_by_clue(
+    ordered: list[Candidate], *, limit: int
+) -> tuple[Candidate, ...]:
+    """Keep at most one row per clue surface (best score first).
+
+    Scoring emits one candidate per (clue, n); without deduping, ``top_candidates``
+    repeats the same clue word with different N/target subsets.
+    """
+
+    seen: set[str] = set()
+    out: list[Candidate] = []
+    for c in ordered:
+        if c.clue in seen:
+            continue
+        seen.add(c.clue)
+        out.append(c)
+        if len(out) >= limit:
+            break
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class _ClueIndex:
     """Pre-computed alignment of clue vocabulary into the embedding matrix."""
@@ -31,10 +52,9 @@ class _ClueIndex:
     @classmethod
     def build(cls, vocab: Vocabulary, matrix: EmbeddingMatrix) -> "_ClueIndex":
         df = vocab.df
-        keep_surfaces: list[str] = []
-        keep_lemmas: list[str] = []
-        keep_zipfs: list[float] = []
-        keep_idx: list[int] = []
+        # Same surface can appear on multiple vocab rows (e.g. different POS passes);
+        # keep one row per clue surface — highest Zipf wins (commonest reading).
+        best: dict[str, tuple[str, float, int]] = {}
         for surface, lemma, zipf in zip(
             df["surface"].tolist(),
             df["lemma"].tolist(),
@@ -44,10 +64,15 @@ class _ClueIndex:
             idx = matrix.index_of(surface)
             if idx is None:
                 continue
-            keep_surfaces.append(surface)
-            keep_lemmas.append(lemma)
-            keep_zipfs.append(float(zipf))
-            keep_idx.append(idx)
+            z = float(zipf)
+            prev = best.get(surface)
+            if prev is None or z > prev[1]:
+                best[surface] = (lemma, z, idx)
+        ordered = sorted(best.items(), key=lambda kv: kv[0])
+        keep_surfaces = [s for s, _ in ordered]
+        keep_lemmas = [t[0] for _, t in ordered]
+        keep_zipfs = [t[1] for _, t in ordered]
+        keep_idx = [t[2] for _, t in ordered]
         return cls(
             surfaces=keep_surfaces,
             lemmas=keep_lemmas,
@@ -66,7 +91,8 @@ class AISpymaster(Spymaster):
          worth scoring are prefixes (size 1..F).
       3. Apply hard vetoes (margin floor, assassin ceiling) and the legality
          rule. Score survivors via `ScoringWeights`.
-      4. Pick the highest-scoring candidate; keep the top `top_k` for the trace.
+      4. Pick the highest-scoring candidate; keep the top `top_k` distinct clue
+         surfaces for the trace (best-scoring N per clue).
     """
 
     def __init__(
@@ -77,7 +103,7 @@ class AISpymaster(Spymaster):
         risk: float = 0.5,
         weights: ScoringWeights | None = None,
         rule_strictness: RuleStrictness = "lemma_substring",
-        top_k: int = 50,
+        top_k: int = 200,
         reranker: SpymasterReranker | None = None,
     ) -> None:
         self.matrix = matrix
@@ -126,6 +152,7 @@ class AISpymaster(Spymaster):
             if assassin is not None
             else np.full(len(clue_vecs), _NEG_INF, dtype=np.float32)
         )
+        sim_all = clue_vecs @ self._stack(active).T  # (M, A)
 
         # Per-row sorted friendly similarities + their card identities.
         sort_idx = np.argsort(-sim_friendly, axis=1)
@@ -145,16 +172,66 @@ class AISpymaster(Spymaster):
 
         candidates, veto_count, illegal_count = self._score_all(
             clue_idx=clue_idx,
+            team=team,
             friendly=friendly,
             sort_idx=sort_idx,
             sorted_friendly=sorted_friendly,
             best_opp=best_opp,
             best_non_friendly=best_non_friendly,
             sim_assassin=sim_assassin,
+            sim_all=sim_all,
             active_cards=active,
         )
 
         candidates.sort(key=lambda c: c.score, reverse=True)
+
+        if logger.isEnabledFor(logging.DEBUG):
+            if not candidates:
+                logger.debug(
+                    "spymaster embedding ranking: 0 survivors "
+                    "(vetoes=%d, illegal_clue_slots=%d)",
+                    veto_count,
+                    illegal_count,
+                )
+            else:
+                n_show = min(
+                    len(candidates),
+                    self.reranker.top_k
+                    if self.reranker is not None
+                    else min(self.top_k, 40),
+                )
+                logger.debug(
+                    "spymaster embedding ranking: %d survivors (vetoes=%d, "
+                    "illegal_clue_slots=%d); top %d by embedding score:",
+                    len(candidates),
+                    veto_count,
+                    illegal_count,
+                    n_show,
+                )
+                for rank, c in enumerate(candidates[:n_show], start=1):
+                    comp = c.components
+                    logger.debug(
+                        "  emb #%d score=%.4f margin=%.4f clue=%r n=%d targets=%s | "
+                        "friendly_min_sim=%.4f exp_reward=%.4f exp_b=%+.4f "
+                        "freq_b=%+.4f margin_b=%+.4f amb_b=%+.4f "
+                        "assassin_p=%.4f opp_p=%.4f under_p=%.4f zipf=%.2f",
+                        rank,
+                        c.embedding_score,
+                        c.margin,
+                        c.clue,
+                        c.n,
+                        list(c.targets),
+                        comp.friendly_min_sim,
+                        comp.expected_reward_raw,
+                        comp.expected_reward_bonus,
+                        comp.freq_bonus,
+                        comp.margin_bonus,
+                        comp.ambition_bonus,
+                        comp.assassin_penalty,
+                        comp.opponent_penalty,
+                        comp.undercluster_penalty,
+                        c.zipf,
+                    )
 
         if self.reranker is not None and candidates:
             # Per PRD: only the top-K shortlist competes after rerank. The
@@ -166,15 +243,41 @@ class AISpymaster(Spymaster):
             candidates = list(self.reranker.rerank(shortlist, view))
             candidates.sort(key=lambda c: c.score, reverse=True)
 
-        top = tuple(candidates[: self.top_k])
+            if logger.isEnabledFor(logging.DEBUG):
+                n_final = min(len(candidates), self.reranker.top_k)
+                logger.debug(
+                    "spymaster ranking after rerank: top %d by blended score:",
+                    n_final,
+                )
+                for rank, c in enumerate(candidates[:n_final], start=1):
+                    llm = (
+                        f"{c.llm_score:.4f}"
+                        if c.llm_score is not None
+                        else "—"
+                    )
+                    reason = (c.llm_reason or "").strip()
+                    tail = f" | {reason}" if reason else ""
+                    logger.debug(
+                        "  final #%d blend=%.4f emb=%.4f llm=%s clue=%r n=%d targets=%s%s",
+                        rank,
+                        c.score,
+                        c.embedding_score,
+                        llm,
+                        c.clue,
+                        c.n,
+                        list(c.targets),
+                        tail,
+                    )
 
-        if not top:
+        if not candidates:
             raise NoLegalClueError(
                 f"no candidates passed vetoes "
                 f"(rejected: {veto_count} by margin/assassin, {illegal_count} by legality)"
             )
 
-        chosen = top[0]
+        chosen = candidates[0]
+        top = _dedupe_candidates_by_clue(candidates, limit=self.top_k)
+
         logger.info(
             "spymaster chose %r (n=%d, score=%.3f, margin=%.3f)",
             chosen.clue,
@@ -209,12 +312,14 @@ class AISpymaster(Spymaster):
         self,
         *,
         clue_idx: _ClueIndex,
+        team: Color,
         friendly: list[Card],
         sort_idx: np.ndarray,
         sorted_friendly: np.ndarray,
         best_opp: np.ndarray,
         best_non_friendly: np.ndarray,
         sim_assassin: np.ndarray,
+        sim_all: np.ndarray,
         active_cards: list[Card],
     ) -> tuple[list[Candidate], int, int]:
         weights = self.weights
@@ -231,6 +336,7 @@ class AISpymaster(Spymaster):
             assassin_sim = float(sim_assassin[i])
             opp_sim = float(best_opp[i]) if best_opp[i] != _NEG_INF else 0.0
             row_sorted = sorted_friendly[i]
+            row_all = sim_all[i]
 
             # Legality (filters surface and lemma vs all active cards).
             if not is_legal_clue(
@@ -258,6 +364,17 @@ class AISpymaster(Spymaster):
                 fb = freq_bonus(zipf, weights.freq_weight)
                 assassin_penalty = weights.assassin_weight * max(assassin_sim, 0.0)
                 opponent_penalty = weights.opponent_weight * max(opp_sim, 0.0)
+                exp_reward_raw = self._estimate_expected_reward(
+                    similarities=row_all,
+                    active_cards=active_cards,
+                    team=team,
+                    n=n,
+                    seed=(i + 1) * 1009 + n * 9173,
+                )
+                exp_reward_bonus = weights.expected_reward_weight * exp_reward_raw
+                floor_n = min(weights.prefer_min_targets, F)
+                shortfall = max(0, floor_n - n)
+                under_penalty = weights.undercluster_penalty_weight * shortfall
 
                 components = ScoreComponents(
                     friendly_min_sim=friendly_min_sim,
@@ -266,6 +383,9 @@ class AISpymaster(Spymaster):
                     freq_bonus=fb,
                     assassin_penalty=assassin_penalty,
                     opponent_penalty=opponent_penalty,
+                    expected_reward_bonus=exp_reward_bonus,
+                    expected_reward_raw=exp_reward_raw,
+                    undercluster_penalty=under_penalty,
                 )
                 target_indices = sort_idx[i, :n]
                 targets = tuple(friendly[int(idx)].word for idx in target_indices)
@@ -284,3 +404,65 @@ class AISpymaster(Spymaster):
                 )
 
         return candidates, veto_count, illegal_count
+
+    def _estimate_expected_reward(
+        self,
+        *,
+        similarities: np.ndarray,
+        active_cards: list[Card],
+        team: Color,
+        n: int,
+        seed: int,
+    ) -> float:
+        """Estimate expected clue value with Monte Carlo rollout of guesses.
+
+        Simulation samples guess order from similarity-induced probabilities.
+        It scores the sequence until a non-friendly card ends the turn.
+        """
+        w = self.weights
+        if not active_cards:
+            return 0.0
+        temp = max(1e-3, float(w.mc_temperature))
+        sims = similarities.astype(np.float64)
+        trials = max(1, int(w.mc_trials))
+        rng = np.random.default_rng(seed)
+        opp = team.opponent()
+        rewards = {
+            team: float(w.reward_friendly),
+            opp: float(w.reward_opponent),
+            Color.NEUTRAL: float(w.reward_neutral),
+            Color.ASSASSIN: float(w.reward_assassin),
+        }
+        total = 0.0
+        for _ in range(trials):
+            avail = np.ones(len(active_cards), dtype=bool)
+            trial_score = 0.0
+            picks = 0
+            while picks < n and np.any(avail):
+                avail_idx = np.flatnonzero(avail)
+                logits = sims[avail_idx] / temp
+                logits -= logits.max()
+                probs = np.exp(logits)
+                probs_sum = probs.sum()
+                if probs_sum <= 0.0:
+                    probs = np.full_like(probs, 1.0 / len(probs))
+                else:
+                    probs /= probs_sum
+                chosen_local = int(rng.choice(len(avail_idx), p=probs))
+                idx = int(avail_idx[chosen_local])
+                avail[idx] = False
+                card = active_cards[idx]
+                if card.color == team:
+                    trial_score += rewards[team]
+                    picks += 1
+                    continue
+                if card.color == opp:
+                    trial_score += rewards[opp]
+                    break
+                if card.color == Color.NEUTRAL:
+                    trial_score += rewards[Color.NEUTRAL]
+                    break
+                trial_score += rewards[Color.ASSASSIN]
+                break
+            total += trial_score
+        return total / float(trials)

@@ -10,7 +10,8 @@ def _card(word, lemma=None, color=Color.RED, revealed=False):
 
 class TestLemmaStrictness:
     """Default `lemma_substring` strictness is exercised in TestLemmaSubstring;
-    here we verify the looser `lemma` mode rejects only exact matches."""
+    here we verify the looser `lemma` mode skips substring vetoes but keeps exact
+    matches and spelling-distance vetoes."""
 
     def test_accepts_unrelated_clue(self):
         assert is_legal_clue(
@@ -44,6 +45,71 @@ class TestLemmaStrictness:
             clue_lemma="catnap",
             active_cards=[_card("cat")],
             strictness="lemma",
+        )
+
+
+class TestLevenshteinSpelling:
+    """Reject clue/board pairs with edit distance <= 1 when both sides are 5+ chars."""
+
+    def test_rejects_us_uk_spelling_variant(self):
+        assert not is_legal_clue(
+            clue_surface="rumours",
+            clue_lemma="rumours",
+            active_cards=[_card("rumors")],
+        )
+
+    def test_rejects_one_substitution_five_letters(self):
+        assert not is_legal_clue(
+            clue_surface="apple",
+            clue_lemma="apple",
+            active_cards=[_card("apply")],
+        )
+
+    def test_allows_one_edit_when_either_word_under_five_letters(self):
+        assert is_legal_clue(
+            clue_surface="bat",
+            clue_lemma="bat",
+            active_cards=[_card("cat")],
+        )
+
+    def test_spelling_rule_applies_in_lemma_only_strictness(self):
+        assert not is_legal_clue(
+            clue_surface="rumours",
+            clue_lemma="rumours",
+            active_cards=[_card("rumors")],
+            strictness="lemma",
+        )
+
+
+class TestDerivationalFamily:
+    def test_rejects_indication_family_variants(self):
+        board = [_card("indication")]
+        assert not is_legal_clue(
+            clue_surface="indicates",
+            clue_lemma="indicate",
+            active_cards=board,
+        )
+        assert not is_legal_clue(
+            clue_surface="indicator",
+            clue_lemma="indicator",
+            active_cards=board,
+        )
+        assert not is_legal_clue(
+            clue_surface="indicating",
+            clue_lemma="indicate",
+            active_cards=board,
+        )
+        assert not is_legal_clue(
+            clue_surface="indicative",
+            clue_lemma="indicative",
+            active_cards=board,
+        )
+
+    def test_allows_same_prefix_without_derivational_suffix(self):
+        assert is_legal_clue(
+            clue_surface="indigo",
+            clue_lemma="indigo",
+            active_cards=[_card("indication")],
         )
 
 

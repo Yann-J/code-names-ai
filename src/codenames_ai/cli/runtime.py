@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from codenames_ai.agent.guesser import AIGuesser
 from codenames_ai.agent.rerank import GuesserReranker, SpymasterReranker
+from codenames_ai.agent.scoring import ScoringWeights
 from codenames_ai.agent.spymaster import AISpymaster
 from codenames_ai.cli.eval_config import EvalAgentConfigFile
 from codenames_ai.config import Config
@@ -31,15 +32,15 @@ def _vocab_config(game: EvalAgentConfigFile, *, game_words: bool) -> VocabConfig
     if game_words:
         return VocabConfig(
             language=game.language,
-            zipf_min=game.game_zipf_min,
-            zipf_max=game.game_zipf_max,
+            zipf_min=game.game_zipf.min,
+            zipf_max=game.game_zipf.max,
             allowed_pos=frozenset(game.game_allowed_pos),
             exclusions_path=game.exclusions_path,
         )
     return VocabConfig(
         language=game.language,
-        zipf_min=game.clue_zipf_min,
-        zipf_max=game.clue_zipf_max,
+        zipf_min=game.clue_zipf.min,
+        zipf_max=game.clue_zipf.max,
         allowed_pos=frozenset(game.clue_allowed_pos),
         exclusions_path=game.exclusions_path,
     )
@@ -79,7 +80,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
             temperature=0.0,
         )
         spy_reranker = SpymasterReranker(
-            llm, top_k=cfg.rerank_top_k, blend_alpha=cfg.blend_alpha
+            llm, top_k=cfg.embedding_top_k, blend_alpha=cfg.blend_alpha
         )
         guess_reranker = GuesserReranker(
             llm,
@@ -87,12 +88,19 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
             blend_alpha=cfg.blend_alpha,
         )
 
+    spy_weights = replace(
+        ScoringWeights.from_risk(cfg.risk),
+        prefer_min_targets=cfg.prefer_min_targets,
+        expected_reward_weight=cfg.expected_reward_weight,
+        mc_trials=cfg.mc_trials,
+    )
     spymaster = AISpymaster(
         matrix,
         clue_vocab,
         risk=cfg.risk,
         top_k=cfg.top_k_trace,
         reranker=spy_reranker,
+        weights=spy_weights,
     )
     guesser = AIGuesser(matrix, risk=cfg.risk, reranker=guess_reranker)
     return EvalRuntime(

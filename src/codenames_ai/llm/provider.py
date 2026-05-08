@@ -84,7 +84,9 @@ class OpenAICompatibleProvider(LLMProvider):
         *,
         json_mode: bool = False,
     ) -> str:
-        msgs = [m.to_dict() if isinstance(m, ChatMessage) else dict(m) for m in messages]
+        msgs = [
+            m.to_dict() if isinstance(m, ChatMessage) else dict(m) for m in messages
+        ]
 
         if self.cache is not None:
             cached = self.cache.get(

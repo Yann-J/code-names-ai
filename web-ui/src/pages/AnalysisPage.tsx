@@ -7,15 +7,26 @@ export function AnalysisPage() {
   const [seed, setSeed] = useState(0)
   const [risk, setRisk] = useState(0.5)
   const [data, setData] = useState<Awaited<ReturnType<typeof postAnalysis>> | null>(null)
+  const [activeTeam, setActiveTeam] = useState<'red' | 'blue'>('red')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const currentTrace = data ? data.traces[activeTeam.toUpperCase()] ?? null : null
+
+  function randomizeSeed() {
+    setSeed(Math.floor(Math.random() * 2_147_483_647))
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
     setBusy(true)
     try {
-      setData(await postAnalysis({ seed, risk }))
+      const nextData = await postAnalysis({ seed, risk })
+      setData(nextData)
+      if (nextData.traces[nextData.first_team]) {
+        setActiveTeam(nextData.first_team === 'BLUE' ? 'blue' : 'red')
+      }
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : String(ex))
       setData(null)
@@ -34,6 +45,9 @@ export function AnalysisPage() {
         <label>
           Seed <input type="number" value={seed} onChange={(e) => setSeed(+e.target.value)} />
         </label>
+        <button type="button" className="btn-secondary" onClick={randomizeSeed} disabled={busy}>
+          Randomize seed
+        </button>
         <label className="risk-control risk-control--inline">
           <span className="risk-control__label">Risk</span>
           <div className="risk-control__row">
@@ -56,50 +70,6 @@ export function AnalysisPage() {
 
       {data ? (
         <>
-          <h2>Chosen</h2>
-          {data.trace.chosen ? (
-            <p>
-              <strong>
-                {data.trace.chosen.clue}
-              </strong>{' '}
-              (N={data.trace.chosen.n}) targets: {data.trace.chosen.targets.join(', ')}
-            </p>
-          ) : (
-            <p>No legal clue (passed).</p>
-          )}
-
-          <h2>Top candidates</h2>
-          <div className="table-scroll">
-            <table className="analysis-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>clue</th>
-                  <th>N</th>
-                  <th>score</th>
-                  <th>margin</th>
-                  <th>embedding</th>
-                  <th>LLM</th>
-                  <th>reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.trace.top_candidates.map((c, i) => (
-                  <tr key={i}>
-                    <td>{i + 1}</td>
-                    <td>{c.clue}</td>
-                    <td>{c.n}</td>
-                    <td>{c.score.toFixed(3)}</td>
-                    <td>{c.margin.toFixed(3)}</td>
-                    <td>{c.embedding_score.toFixed(3)}</td>
-                    <td>{c.llm_score != null ? c.llm_score.toFixed(3) : '—'}</td>
-                    <td>{c.llm_reason ?? ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
           <h2>Board (first team {data.first_team})</h2>
           <div className="analysis-grid">
             {data.board.map((c) => (
@@ -108,6 +78,79 @@ export function AnalysisPage() {
               </div>
             ))}
           </div>
+
+          <div className="analysis-tabs" role="tablist" aria-label="Recommendation team">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTeam === 'red'}
+              className={activeTeam === 'red' ? 'analysis-tab active' : 'analysis-tab'}
+              onClick={() => setActiveTeam('red')}
+            >
+              Red team
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTeam === 'blue'}
+              className={activeTeam === 'blue' ? 'analysis-tab active' : 'analysis-tab'}
+              onClick={() => setActiveTeam('blue')}
+            >
+              Blue team
+            </button>
+          </div>
+
+          {currentTrace ? (
+            <>
+              <h2>Chosen</h2>
+              {currentTrace.chosen ? (
+                <p>
+                  <strong>
+                    {currentTrace.chosen.clue}
+                  </strong>{' '}
+                  (N={currentTrace.chosen.n}) targets: {currentTrace.chosen.targets.join(', ')}
+                </p>
+              ) : (
+                <p>No legal clue (passed).</p>
+              )}
+
+              <h2>Top candidates</h2>
+              <div className="table-scroll">
+                <table className="analysis-table">
+                  <thead>
+                    <tr>
+                      <th title="Rank among candidates for this team and board">#</th>
+                      <th title="Single-word clue proposal">clue</th>
+                      <th title="Number of intended target cards. Hover each value to see the target words.">N</th>
+                      <th title="Final weighted score used for candidate ranking (after any reranking).">final score</th>
+                      <th title="Raw expected reward estimate before weighting. Higher is generally better.">exp. reward</th>
+                      <th title="Safety margin versus dangerous cards; higher means safer separation.">margin</th>
+                      <th title="Embedding-only score before optional LLM reranking.">embedding</th>
+                      <th title="LLM reranker score when enabled (otherwise empty).">LLM</th>
+                      <th title="Short rationale returned by the LLM reranker.">reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentTrace.top_candidates.map((c, i) => (
+                      <tr key={i}>
+                        <td>{i + 1}</td>
+                        <td>{c.clue}</td>
+                        <td title={c.targets.join(', ')}>{c.n}</td>
+                        <td>{c.score.toFixed(3)}</td>
+                        <td>{c.components.expected_reward_raw.toFixed(3)}</td>
+                        <td>{c.margin.toFixed(3)}</td>
+                        <td>{c.embedding_score.toFixed(3)}</td>
+                        <td>{c.llm_score != null ? c.llm_score.toFixed(3) : '—'}</td>
+                        <td>{c.llm_reason ?? ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="muted">No recommendation available for this team.</p>
+          )}
         </>
       ) : null}
     </div>

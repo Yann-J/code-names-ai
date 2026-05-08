@@ -240,6 +240,9 @@ class ScoreComponentsPayload(BaseModel):
     freq_bonus: float
     assassin_penalty: float
     opponent_penalty: float
+    expected_reward_bonus: float
+    expected_reward_raw: float
+    undercluster_penalty: float = 0.0
     total: float
 
 
@@ -277,7 +280,7 @@ class AnalysisBoardCard(BaseModel):
 class AnalysisResponse(BaseModel):
     seed: int
     risk: float
-    trace: SpymasterTracePayload
+    traces: dict[str, SpymasterTracePayload]
     board: list[AnalysisBoardCard]
     first_team: str
 
@@ -303,6 +306,9 @@ def spymaster_trace_to_payload(trace: SpymasterTrace) -> SpymasterTracePayload:
                 freq_bonus=comp.freq_bonus,
                 assassin_penalty=comp.assassin_penalty,
                 opponent_penalty=comp.opponent_penalty,
+                expected_reward_bonus=comp.expected_reward_bonus,
+                expected_reward_raw=comp.expected_reward_raw,
+                undercluster_penalty=comp.undercluster_penalty,
                 total=comp.total,
             ),
             margin=c.margin,

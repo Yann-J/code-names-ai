@@ -127,6 +127,19 @@ def _basic_setup_with_two_clues():
 
 
 class TestSpymasterReranker:
+    def test_system_prompt_mentions_root_overlap_penalty(self):
+        matrix, vocab, board = _basic_setup_with_two_clues()
+        llm = FakeLLM(
+            '{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}'
+        )
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
+        spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
+        spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
+        assert llm.calls
+        messages, _ = llm.calls[0]
+        system = messages[0]["content"]
+        assert "share a clear word root with any active board word" in system
+
     def test_blends_score_and_marks_llm_fields(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
         # LLM strongly prefers 'clue_b' over 'clue_a'.

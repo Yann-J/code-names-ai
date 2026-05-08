@@ -11,7 +11,7 @@ A Python package that plays the word game [Code Names](https://en.wikipedia.org/
 Two vocabularies are built from [wordfreq](https://github.com/rspeer/wordfreq) Zipf-frequency data, filtered through spaCy for POS tagging and lemmatisation:
 
 - **Game-word vocabulary** — Zipf 4–6.5, nouns only (~500–2000 common concrete nouns for board cards).
-- **Clue-word vocabulary** — Zipf 3–7, nouns + adjectives (~30–60 K candidate clue words).
+- **Clue-word vocabulary** — Zipf 3–7, nouns + adjectives + verbs (~30–60 K candidate clue words).
 
 Both are cached as Parquet files under `~/.cache/codenames_ai/vocab/`.
 
@@ -22,9 +22,9 @@ Every word in the clue vocabulary is projected through a **fastText model** (`cc
 ### Spymaster agent
 
 1. Compute cosine similarity of every clue candidate against every active board word (one NumPy matrix multiply).
-2. For each clue, consider only *prefix subsets* of the descending-similarity-sorted friendlies (the only subsets that can improve margin).
-3. Apply **hard vetoes**: margin below floor, or similarity to the assassin above ceiling.
-4. Score survivors:
+1. For each clue, consider only *prefix subsets* of the descending-similarity-sorted friendlies (the only subsets that can improve margin).
+1. Apply **hard vetoes**: margin below floor, or similarity to the assassin above ceiling.
+1. Score survivors:
 
    ```
    score = friendly_min_sim
@@ -35,8 +35,9 @@ Every word in the clue vocabulary is projected through a **fastText model** (`cc
          − opponent_weight × max sim(clue, opponent)
    ```
 
-5. Pass the top-K candidates to an **LLM** (any OpenAI-compatible endpoint) for scoring with a one-sentence reason.
-6. Blend: `α × normalised_embedding_score + (1−α) × llm_score`.
+1. Filter for legal clues (drop clues too close to a game word, or offensive words from a simple blacklist dictionary)
+1. Pass the top-K candidates to an **LLM** (any OpenAI-compatible endpoint) for scoring with a one-sentence reason, in order to capture subtle word connections that wouldn't be surfaced by the pure embeddings.
+1. Blend: `α × normalised_embedding_score + (1−α) × llm_score`.
 
 ### Guesser agent
 
@@ -141,7 +142,14 @@ label: baseline
 risk: 0.5
 language: en
 llm_rerank: true   # set false to skip LLM and use embedding-only agents
-rerank_top_k: 10
+game_zipf:
+  min: 4.0
+  max: 6.5
+clue_zipf:
+  min: 3.0
+  max: 7.0
+embedding_top_k: 20    # top embedding candidates sent to the spymaster LLM
+top_k_trace: 200       # how many ranked candidates to keep in the trace / API
 blend_alpha: 0.5
 ```
 
@@ -168,16 +176,19 @@ Use `--embedding-only` to override `llm_rerank` in YAML and run without any LLM 
 | `label` | `"default"` | Name shown in comparison table and stored in parquet |
 | `risk` | `0.5` | Risk knob 0–1 |
 | `language` | `"en"` | Language code |
-| `game_zipf_min/max` | `4.0 / 6.5` | Frequency window for board-card vocabulary |
-| `clue_zipf_min/max` | `3.0 / 7.0` | Frequency window for clue vocabulary |
+| `game_zipf` | `{min: 4.0, max: 6.5}` | Frequency window for board-card vocabulary (nested `min` / `max`) |
+| `clue_zipf` | `{min: 3.0, max: 7.0}` | Frequency window for clue vocabulary (nested `min` / `max`) |
 | `game_allowed_pos` | `["NOUN"]` | spaCy POS tags kept for game words |
-| `clue_allowed_pos` | `["NOUN", "ADJ"]` | spaCy POS tags kept for clues |
+| `clue_allowed_pos` | `["NOUN", "ADJ", "VERB"]` | spaCy POS tags kept for clues |
 | `exclusions_path` | `null` | Path to a one-word-per-line exclusion file |
-| `top_k_trace` | `50` | How many candidates to surface in the `SpymasterTrace` |
+| `top_k_trace` | `200` | How many candidates to surface in the `SpymasterTrace` after rerank |
 | `llm_rerank` | `true` | Enable LLM reranking step |
-| `rerank_top_k` | `10` | Candidates sent to the LLM |
+| `embedding_top_k` | `20` | Top embedding-scored candidates sent to the spymaster LLM |
 | `blend_alpha` | `0.5` | α in `α·embedding + (1−α)·llm` blend |
 | `guesser_extra_candidates` | `3` | Extra candidates passed to the guesser LLM beyond N |
+| `prefer_min_targets` | `3` | Soft minimum friendly count each clue should aim for |
+
+Deprecated YAML keys (still accepted): `game_zipf_min` / `game_zipf_max` → `game_zipf`, `clue_zipf_min` / `clue_zipf_max` → `clue_zipf`, and `rerank_top_k` → `embedding_top_k`.
 
 ### Web UI
 
@@ -252,7 +263,7 @@ llm = OpenAICompatibleProvider(
 
 spymaster = AISpymaster(
     matrix, clue_vocab, risk=0.5,
-    reranker=SpymasterReranker(llm, top_k=10, blend_alpha=0.5),
+    reranker=SpymasterReranker(llm, top_k=200, blend_alpha=0.5),
 )
 ```
 

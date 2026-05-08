@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from codenames_ai.agent.trace import Candidate, CandidateGuess
@@ -12,11 +12,18 @@ from codenames_ai.llm.provider import ChatMessage, LLMProvider
 logger = logging.getLogger(__name__)
 
 
+def _format_messages_for_debug(messages: list[ChatMessage]) -> str:
+    """Human-readable dump of the chat for DEBUG logs."""
+    return "\n\n".join(f"--- {m.role} ---\n{m.content}" for m in messages)
+
+
 @dataclass(frozen=True)
 class RerankItem:
     index: int  # 1-based index into the shortlist
     score: float  # 0..1
     reason: str
+    clue: str = ""
+    targets: tuple[str, ...] = field(default_factory=tuple)
 
 
 _SPYMASTER_SYSTEM = (
@@ -24,12 +31,16 @@ _SPYMASTER_SYSTEM = (
     "For each candidate, give a score from 0.0 (terrible) to 1.0 (excellent) "
     "reflecting how confidently a typical human guesser on the spymaster's team "
     "would correctly identify the intended target words and only those words. "
-    "Penalize clues whose meaning is closer to non-friendly cards (especially the "
-    "ASSASSIN), clues with awkward double meanings, and clues whose count claims "
-    "more targets than the connection actually supports. Be discriminating — "
+    "When several candidates have a plausible semantic link, prefer those that cover "
+    "more of the listed targets together (multi-word plays are better than a count of 1 "
+    "unless a single-target reading is clearly the only fair one). "
+    "Penalize clues whose meaning is closer to non-friendly cards, especially the "
+    "ASSASSIN (in this case mention which ones), clues with awkward double meanings, clues whose count claims "
+    "more targets than the connection actually supports, clues that share a clear word root with any active board word "
+    "(e.g. indicate/indication/indicator), and clues that are too vulgar or offensive. Be discriminating — "
     "most candidates should NOT score 1.0.\n\n"
     "Respond with strict JSON of shape:\n"
-    '{"scores": [{"index": <int 1-based>, "score": <float 0..1>, "reason": "<short>"}, ...]}'
+    '{"scores": [{"clue":"<clue>", "targets": ["<target1>",...],  "index": <int 1-based>, "score": <float 0..1>, "reason": "<short>"}, ...]}'
 )
 
 
@@ -90,8 +101,16 @@ def _parse_response(text: str, expected_count: int) -> dict[int, RerankItem]:
             continue
         score = max(0.0, min(1.0, score))
         reason = str(entry.get("reason", "")).strip()
+        clue_raw = entry.get("clue")
+        clue = str(clue_raw).strip() if clue_raw is not None else ""
+        targets: tuple[str, ...] = ()
+        t_raw = entry.get("targets")
+        if isinstance(t_raw, list):
+            targets = tuple(str(x).strip() for x in t_raw if x is not None)
         if 1 <= idx <= expected_count:
-            out[idx] = RerankItem(index=idx, score=score, reason=reason)
+            out[idx] = RerankItem(
+                index=idx, score=score, reason=reason, clue=clue, targets=targets
+            )
     return out
 
 
@@ -117,7 +136,9 @@ class SpymasterReranker:
         self.top_k = top_k
         self.blend_alpha = blend_alpha
 
-    def rerank(self, shortlist: list[Candidate], view: SpymasterView) -> list[Candidate]:
+    def rerank(
+        self, shortlist: list[Candidate], view: SpymasterView
+    ) -> list[Candidate]:
         if not shortlist:
             return shortlist
         n = min(len(shortlist), self.top_k)
@@ -127,7 +148,15 @@ class SpymasterReranker:
             ChatMessage(role="system", content=_SPYMASTER_SYSTEM),
             ChatMessage(role="user", content=self._user_prompt(head, view)),
         ]
+        logger.debug(
+            "spymaster rerank LLM request (json_mode=True, blend_alpha=%s, top_k=%s):\n%s",
+            self.blend_alpha,
+            n,
+            _format_messages_for_debug(messages),
+        )
         response = self.llm.chat(messages, json_mode=True)
+        logger.debug("spymaster rerank LLM response:\n%s", response)
+
         parsed = _parse_response(response, expected_count=n)
 
         normalized = _normalize_minmax(c.embedding_score for c in head)
@@ -135,12 +164,34 @@ class SpymasterReranker:
         for i, cand in enumerate(head):
             item = parsed.get(i + 1)
             if item is None:
+                logger.debug(
+                    "spymaster rerank #%d: clue=%r n=%s targets=%s — no LLM entry; "
+                    "keeping embedding_score=%.6f",
+                    i + 1,
+                    cand.clue,
+                    cand.n,
+                    list(cand.targets),
+                    cand.embedding_score,
+                )
                 # Fall back: keep embedding score, flag missing rerank.
                 out.append(cand)
                 continue
             blended = (
-                self.blend_alpha * normalized[i]
-                + (1.0 - self.blend_alpha) * item.score
+                self.blend_alpha * normalized[i] + (1.0 - self.blend_alpha) * item.score
+            )
+            logger.debug(
+                "spymaster rerank #%d: clue=%r n=%s targets=%s — "
+                "emb_raw=%.6f emb_norm=%.4f llm=%.4f blend=%.4f (α=%.2f) | %s",
+                i + 1,
+                cand.clue,
+                cand.n,
+                list(cand.targets),
+                cand.embedding_score,
+                normalized[i],
+                item.score,
+                blended,
+                self.blend_alpha,
+                item.reason,
             )
             out.append(
                 replace(
@@ -160,9 +211,7 @@ class SpymasterReranker:
         lines.append("")
         lines.append("Candidate clues:")
         for i, c in enumerate(shortlist, start=1):
-            lines.append(
-                f'{i}. clue="{c.clue}" targets={list(c.targets)} N={c.n}'
-            )
+            lines.append(f'{i}. clue="{c.clue}" targets={list(c.targets)} N={c.n}')
         return "\n".join(lines)
 
 
@@ -198,7 +247,15 @@ class GuesserReranker:
             ChatMessage(role="system", content=_GUESSER_SYSTEM),
             ChatMessage(role="user", content=self._user_prompt(head, view, clue)),
         ]
+        logger.debug(
+            "guesser rerank LLM request (json_mode=True, blend_alpha=%s, shortlist=%s):\n%s",
+            self.blend_alpha,
+            n,
+            _format_messages_for_debug(messages),
+        )
         response = self.llm.chat(messages, json_mode=True)
+        logger.debug("guesser rerank LLM response:\n%s", response)
+
         parsed = _parse_response(response, expected_count=n)
 
         normalized = _normalize_minmax(c.similarity for c in head)
@@ -206,11 +263,28 @@ class GuesserReranker:
         for i, cand in enumerate(head):
             item = parsed.get(i + 1)
             if item is None:
+                logger.debug(
+                    "guesser rerank #%d: card=%r — no LLM entry; keeping similarity=%.6f",
+                    i + 1,
+                    cand.word,
+                    cand.similarity,
+                )
                 out.append(cand)
                 continue
             blended = (
-                self.blend_alpha * normalized[i]
-                + (1.0 - self.blend_alpha) * item.score
+                self.blend_alpha * normalized[i] + (1.0 - self.blend_alpha) * item.score
+            )
+            logger.debug(
+                "guesser rerank #%d: card=%r — sim_raw=%.6f sim_norm=%.4f llm=%.4f "
+                "blend=%.4f (α=%.2f) | %s",
+                i + 1,
+                cand.word,
+                cand.similarity,
+                normalized[i],
+                item.score,
+                blended,
+                self.blend_alpha,
+                item.reason,
             )
             out.append(
                 replace(

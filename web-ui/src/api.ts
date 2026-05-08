@@ -139,7 +139,7 @@ export async function postEndGuessTurn(
 export interface AnalysisResponse {
   seed: number
   risk: number
-  trace: {
+  traces: Record<string, {
     chosen: { clue: string; n: number; targets: string[] } | null
     top_candidates: Array<{
       clue: string
@@ -147,6 +147,18 @@ export interface AnalysisResponse {
       n: number
       score: number
       embedding_score: number
+      components: {
+        friendly_min_sim: number
+        ambition_bonus: number
+        margin_bonus: number
+        freq_bonus: number
+        assassin_penalty: number
+        opponent_penalty: number
+        expected_reward_bonus: number
+        expected_reward_raw: number
+        undercluster_penalty: number
+        total: number
+      }
       margin: number
       zipf: number
       llm_score: number | null
@@ -154,7 +166,7 @@ export interface AnalysisResponse {
     }>
     veto_count: number
     illegal_count: number
-  }
+  }>
   board: Array<{ word: string; color: string }>
   first_team: string
 }

@@ -6,9 +6,41 @@
   min-width: 14rem;
 }
 
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .table-scroll {
   overflow-x: auto;
   margin-bottom: 1.5rem;
+}
+
+.analysis-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0 0.85rem;
+}
+
+.analysis-tab {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+}
+
+.analysis-tab.active {
+  border-color: var(--accent);
+  background: rgba(91, 140, 255, 0.2);
 }
 
 .analysis-table {

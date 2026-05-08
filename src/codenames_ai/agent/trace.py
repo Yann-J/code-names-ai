@@ -16,6 +16,10 @@ class ScoreComponents:
     freq_bonus: float
     assassin_penalty: float
     opponent_penalty: float
+    expected_reward_bonus: float
+    expected_reward_raw: float
+    undercluster_penalty: float = 0.0
+    """Soft penalty when N is below the preferred cluster size (see ``ScoringWeights``)."""
 
     @property
     def total(self) -> float:
@@ -24,8 +28,10 @@ class ScoreComponents:
             + self.ambition_bonus
             + self.margin_bonus
             + self.freq_bonus
+            + self.expected_reward_bonus
             - self.assassin_penalty
             - self.opponent_penalty
+            - self.undercluster_penalty
         )
 
 

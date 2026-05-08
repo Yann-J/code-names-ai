@@ -105,6 +105,8 @@ def test_api_analysis(client: TestClient):
         pytest.skip("game vocabulary not built")
     assert r.status_code == 200
     data = r.json()
-    assert "trace" in data
+    assert "traces" in data
+    assert "RED" in data["traces"]
+    assert "BLUE" in data["traces"]
     assert len(data["board"]) == 25
     assert data["first_team"] in ("RED", "BLUE")
