@@ -188,3 +188,29 @@ class TestLemmaSubstring:
             clue_lemma="anything",
             active_cards=[],
         )
+
+
+class TestForbiddenSurfaces:
+    def test_rejects_surface_in_blocklist(self):
+        assert not is_legal_clue(
+            clue_surface="ocean",
+            clue_lemma="ocean",
+            active_cards=[_card("moon")],
+            forbidden_surfaces=frozenset({"ocean"}),
+        )
+
+    def test_case_insensitive_blocklist(self):
+        assert not is_legal_clue(
+            clue_surface="Ocean",
+            clue_lemma="ocean",
+            active_cards=[_card("moon")],
+            forbidden_surfaces=frozenset({"ocean"}),
+        )
+
+    def test_accepts_when_not_blocked(self):
+        assert is_legal_clue(
+            clue_surface="ocean",
+            clue_lemma="ocean",
+            active_cards=[_card("moon")],
+            forbidden_surfaces=frozenset({"sand"}),
+        )

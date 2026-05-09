@@ -136,7 +136,8 @@ class TestSpymasterReranker:
         assert llm.calls
         messages, _ = llm.calls[0]
         system = messages[0]["content"]
-        assert "share a clear word root with any active board word" in system
+        assert "same \"word family\"" in system
+        assert "run/running/runner" in system
 
     def test_blends_score_and_marks_llm_fields(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
