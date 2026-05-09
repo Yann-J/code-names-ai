@@ -121,7 +121,8 @@ export function AnalysisPage() {
                     <tr>
                       <th title="Rank among candidates for this team and board">#</th>
                       <th title="Single-word clue proposal">clue</th>
-                      <th title="Number of intended target cards. Hover each value to see the target words.">N</th>
+                      <th title="Number of intended target cards.">N</th>
+                      <th title="Intended target words for this candidate clue.">target words</th>
                       <th title="Final weighted score used for candidate ranking (after any reranking).">final score</th>
                       <th title="Raw expected reward estimate before weighting. Higher is generally better.">exp. reward</th>
                       <th title="Safety margin versus dangerous cards; higher means safer separation.">margin</th>
@@ -135,7 +136,8 @@ export function AnalysisPage() {
                       <tr key={i}>
                         <td>{i + 1}</td>
                         <td>{c.clue}</td>
-                        <td title={c.targets.join(', ')}>{c.n}</td>
+                        <td>{c.n}</td>
+                        <td>{c.targets.length > 0 ? c.targets.join(', ') : '—'}</td>
                         <td>{c.score.toFixed(3)}</td>
                         <td>{c.components.expected_reward_raw.toFixed(3)}</td>
                         <td>{c.margin.toFixed(3)}</td>

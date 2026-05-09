@@ -1,0 +1,92 @@
+# Canonical eval/serve config template with schema defaults.
+# Schema source: src/codenames_ai/cli/eval_config.py (EvalAgentConfigFile).
+
+# Human-readable name for eval comparison tables / parquet rows.
+label: base
+
+# Risk 0–1: cautious ↔ aggressive (margin vetoes, ambition, assassin weight, guesser stop policy).
+risk: 0.6
+
+# Vocabulary filters + language selection.
+vocabulary:
+  # Language code for vocab + fastText model (e.g. en -> cc.en.300.bin).
+  language: en
+
+  # Board-card word frequency window (Zipf).
+  game:
+    zipf:
+      min: 4.0
+      max: 6.5
+    # spaCy coarse POS tags allowed in game cards.
+    allowed_pos: [NOUN]
+
+  # Clue-vocabulary frequency window (Zipf).
+  clue:
+    zipf:
+      min: 3.0
+      max: 7.0
+    # spaCy coarse POS tags allowed in clue pool.
+    allowed_pos: [NOUN, ADJ, VERB]
+
+# Optional path to a one-word-per-line exclusion file.
+exclusions_path: data/exclusions/en.txt
+
+# After embedding scoring: how many top candidates are sent to the spymaster LLM reranker.
+embedding_top_k: 20
+
+# How many ranked (clue, N, targets) candidates to keep in traces / Analysis API after rerank.
+top_k_trace: 200
+
+guesser:
+  # Extra candidates passed to the guesser LLM beyond N.
+  extra_candidates: 3
+  # Softmax temperature for stochastic guess picks (0.0 => deterministic top-rank picks).
+  sampling_temperature: 0.5
+  # Restrict stochastic picks to top-K candidates (0 => all unrevealed candidates).
+  sampling_top_k: 0
+
+scoring:
+  # If true, blend embedding scores with LLM rerank for spymaster + guesser (requires LLM_KEY).
+  llm_rerank: true
+
+  # Blend weight alpha in final score: alpha*normalized_embedding + (1-alpha)*LLM.
+  blend_alpha: 0.5
+
+  # Soft minimum friendly targets per clue (capped by friendlies on board).
+  prefer_min_targets: 3
+
+  # Learned from RL league training
+  ambition_weight: 0.21750186845040914
+  assassin_weight: 1.2843753920412495
+  expected_reward_weight: 1.0750370445068735
+  margin_weight: 0.08814150742335236
+  mc_temperature: 0.09575368059091498
+  opponent_weight: 0.0
+  undercluster_penalty_weight: 0.25969006026145447
+
+  margin_floor: null
+  assassin_ceiling: null
+  # Extra rank sharpening in EV rollout pick sampling (0 disables rank bias).
+  mc_rank_bias: null
+  reward_friendly: null
+  reward_neutral: null
+  reward_opponent: null
+  reward_assassin: null
+
+  # Rollouts per (clue, N) candidate used to estimate expected reward.
+  mc_trials: 96
+
+  # Adaptive EV estimation: run more trials for near-best lane contenders.
+  adaptive_mc_base_trials: 64
+  adaptive_mc_extra_trials: 96
+  adaptive_mc_ev_band: 0.10
+
+  # Lane targets for N=1..7 shortlist construction (normalized internally).
+  lane_target_fractions: [0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01]
+  lane_quality_delta_ev: 0.20
+  lane_max_n: 7
+
+  # EV-modulated LLM rerank:
+  # llm_adj = llm * (1 + gain * tanh((ev - median_ev)/temperature))
+  ev_llm_gain: 0.35
+  ev_llm_temperature: 0.20

@@ -48,7 +48,14 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     for path, (yaml_cfg, digest) in zip(paths, loaded, strict=True):
         cfg = yaml_cfg.model_copy(
-            update={"llm_rerank": yaml_cfg.llm_rerank and not args.embedding_only}
+            update={
+                "scoring": yaml_cfg.scoring.model_copy(
+                    update={
+                        "llm_rerank": yaml_cfg.scoring.llm_rerank
+                        and not args.embedding_only
+                    }
+                )
+            }
         )
         label = cfg.label
         rt = build_eval_runtime(cfg, app)
