@@ -66,6 +66,9 @@ class GameSnapshot(BaseModel):
     seed: int
     risk: float
     roles: RolesPayload
+    first_team: str = Field(
+        description="Team that holds 9 cards (the other holds 8); always also the team that played first.",
+    )
     current_team: str
     current_phase: str
     winner: str | None
@@ -78,6 +81,10 @@ class GameSnapshot(BaseModel):
     turn_history: list[TurnEventPayload]
     ui: GameUiPayload
     guess_flash: GuessFlash | None = None
+    live_mutation_seq: int = Field(
+        default=0,
+        description="Monotonic counter bumped on live room broadcasts; helps host UI prefer fresh WS over stale REST.",
+    )
 
 
 class CreateGameBody(BaseModel):
@@ -221,6 +228,7 @@ def build_game_snapshot(
         seed=st.rng_seed,
         risk=sess.risk,
         roles=_roles_payload(sess),
+        first_team=g.state.board.first_team.value,
         current_team=team_now.value,
         current_phase=phase.value,
         winner=winner_s,
@@ -239,6 +247,7 @@ def build_game_snapshot(
             show_guesser_form=show_guess_form,
         ),
         guess_flash=flash_model,
+        live_mutation_seq=sess.live_mutation_seq,
     )
 
 

@@ -15,7 +15,6 @@ from codenames_ai.cli.runtime import EvalRuntime
 from codenames_ai.game.board import generate_board
 from codenames_ai.game.human import HumanGuesser, HumanSpymaster, trivial_spymaster_trace
 from codenames_ai.game.models import Color, SpymasterView
-from codenames_ai.game.orchestrator import Game
 from codenames_ai.web.api_schemas import (
     AnalysisBoardCard,
     AnalysisRequestBody,
@@ -32,10 +31,12 @@ from codenames_ai.web.game_service import (
     ALLOWED_GUESS_FLASH_KINDS,
     advance_ai,
     apply_human_guess_words,
-    make_players,
+    ensure_human_clue_legal,
+    new_play_session,
     role_key,
 )
-from codenames_ai.web.play_session import PlaySession, Role
+from codenames_ai.web.live_notify import notify_live_watchers
+from codenames_ai.web.play_session import Role
 from codenames_ai.web.session_store import SessionStore
 
 EvalRuntimeFactory = Callable[[float], EvalRuntime]
@@ -63,7 +64,8 @@ def _vocab_too_small() -> JSONResponse:
 
 
 @api_router.post("/games", response_model=CreateGameResponse)
-def api_create_game(
+async def api_create_game(
+    request: Request,
     body: CreateGameBody,
     sessions: StoreDep,
     get_runtime: RuntimeDep,
@@ -76,21 +78,10 @@ def api_create_game(
         Color.RED: {"spymaster": body.red_spy, "guesser": body.red_guess},
         Color.BLUE: {"spymaster": body.blue_spy, "guesser": body.blue_guess},
     }
-    humans: dict[str, HumanSpymaster | HumanGuesser] = {}
-    rs, rg, bs, bg = make_players(rt, roles, humans)
-    board = generate_board(rt.game_vocab, seed=body.seed)
-    game = Game(
-        board,
-        red_spymaster=rs,
-        red_guesser=rg,
-        blue_spymaster=bs,
-        blue_guesser=bg,
-        seed=body.seed,
-    )
     sid = secrets.token_urlsafe(8)
-    sess = PlaySession(id=sid, game=game, roles=roles, humans=humans, risk=body.risk)
+    sess = new_play_session(session_id=sid, rt=rt, seed=body.seed, risk=body.risk, roles=roles)
     sessions.set(sid, sess)
-    advance_ai(sess)
+    await notify_live_watchers(request.app, sess, None)
     snap = build_game_snapshot(sess, include_secret_colors=False)
     return CreateGameResponse(id=sid, state=snap)
 
@@ -116,10 +107,12 @@ def api_get_game(
 
 
 @api_router.post("/games/{sid}/spymaster", response_model=GameSnapshot)
-def api_spymaster(
+async def api_spymaster(
+    request: Request,
     sid: str,
     body: SpymasterGuessBody,
     sessions: StoreDep,
+    get_runtime: RuntimeDep,
     include_secret_colors: bool = False,
 ) -> GameSnapshot:
     sess = sessions.get(sid)
@@ -131,15 +124,22 @@ def api_spymaster(
     if not isinstance(hp, HumanSpymaster):
         raise HTTPException(status_code=400, detail="Not human spymaster turn")
     w = body.word.strip().lower()
+    rt = get_runtime(sess.risk)
+    try:
+        ensure_human_clue_legal(sess, rt.game_vocab, w, body.count)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     trace = trivial_spymaster_trace(w, targets=(), n=body.count)
     hp.prepare(trace)
     sess.game.step()
     advance_ai(sess)
+    await notify_live_watchers(request.app, sess, None)
     return build_game_snapshot(sess, include_secret_colors=include_secret_colors)
 
 
 @api_router.post("/games/{sid}/guesses", response_model=GameSnapshot)
-def api_guesses(
+async def api_guesses(
+    request: Request,
     sid: str,
     body: GuessesBody,
     sessions: StoreDep,
@@ -155,13 +155,30 @@ def api_guesses(
     if not guesses:
         raise HTTPException(status_code=400, detail="No words submitted")
     flash = apply_human_guess_words(sess, guesses)
-    advance_ai(sess)
     sess.ui_guess_flash = None
-    return build_game_snapshot(sess, include_secret_colors=include_secret_colors, guess_flash=flash)
+    await notify_live_watchers(request.app, sess, flash)
+    snap = build_game_snapshot(sess, include_secret_colors=include_secret_colors, guess_flash=flash)
+    return snap
+
+
+@api_router.post("/games/{sid}/advance-ai", response_model=GameSnapshot)
+async def api_advance_ai(
+    request: Request,
+    sid: str,
+    sessions: StoreDep,
+    include_secret_colors: bool = False,
+) -> GameSnapshot:
+    sess = sessions.get(sid)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    advance_ai(sess)
+    await notify_live_watchers(request.app, sess, None)
+    return build_game_snapshot(sess, include_secret_colors=include_secret_colors, guess_flash=None)
 
 
 @api_router.post("/games/{sid}/end-guess-turn", response_model=GameSnapshot)
-def api_end_guess_turn(
+async def api_end_guess_turn(
+    request: Request,
     sid: str,
     sessions: StoreDep,
     include_secret_colors: bool = False,
@@ -176,7 +193,9 @@ def api_end_guess_turn(
         sess.game.end_guessing_turn()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    advance_ai(sess)
+    # Same contract as ``/live/guess/.../end-guess-turn``: notify subscribers, then the client POSTs ``advance-ai``.
+    # Avoids blocking the event loop on ``advance_ai`` so live WebSocket sends complete before AI work runs.
+    await notify_live_watchers(request.app, sess, None)
     return build_game_snapshot(sess, include_secret_colors=include_secret_colors)
 
 

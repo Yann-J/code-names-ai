@@ -3,13 +3,15 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
 from codenames_ai.cli.eval_config import EvalAgentConfigFile, RiskConfig, ScoringConfig
 from codenames_ai.cli.runtime import EvalRuntime, build_eval_runtime
 from codenames_ai.config import Config
 from codenames_ai.web.api_routes import api_router
+from codenames_ai.web.live_registry import LiveRoomRegistry
+from codenames_ai.web.live_routes import live_router
 from codenames_ai.web.session_store import InMemorySessionStore, SessionStore
 
 STATIC_PWA_DIR = Path(__file__).resolve().parent / "static" / "pwa"
@@ -18,6 +20,7 @@ STATIC_PWA_DIR = Path(__file__).resolve().parent / "static" / "pwa"
 def create_app(
     agent_config: EvalAgentConfigFile | None = None,
     session_store: SessionStore | None = None,
+    live_registry: LiveRoomRegistry | None = None,
 ) -> FastAPI:
     """Serve API routes and the React PWA shell.
 
@@ -38,11 +41,21 @@ def create_app(
         return build_eval_runtime(cfg_at_risk(risk), Config())
 
     store = session_store or InMemorySessionStore()
+    live_reg = live_registry if live_registry is not None else LiveRoomRegistry()
 
     app = FastAPI(title="Code Names AI", version="0.1.0")
     app.state.session_store = store
+    app.state.live_registry = live_reg
     app.state.get_runtime = _get_runtime
     app.include_router(api_router)
+    app.include_router(live_router)
+
+    @app.middleware("http")
+    async def live_referrer_policy(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/live"):
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
     if STATIC_PWA_DIR.is_dir():
         root = STATIC_PWA_DIR.resolve()

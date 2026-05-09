@@ -19,3 +19,5 @@ class PlaySession:
     risk: float
     #: Set after a human guess POST; consumed on next GET for one-shot UI feedback.
     ui_guess_flash: dict[str, str] | None = None
+    #: Incremented on each live broadcast so clients can merge REST vs WS without stale ties.
+    live_mutation_seq: int = 0

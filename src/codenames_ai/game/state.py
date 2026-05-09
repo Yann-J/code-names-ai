@@ -28,6 +28,19 @@ class TurnEvent:
     outcome_color: Color | None = None
 
 
+def prior_clue_surfaces_lower(
+    turn_history: tuple[TurnEvent, ...],
+) -> frozenset[str]:
+    """Lowercased clue surfaces already played (Codenames forbids repeating a clue)."""
+    return frozenset(
+        ev.clue.word.lower()
+        for ev in turn_history
+        if ev.kind == "CLUE"
+        and ev.clue is not None
+        and not ev.clue.is_pass()
+    )
+
+
 @dataclass(frozen=True)
 class GameState:
     board: Board

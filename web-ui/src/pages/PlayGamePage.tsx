@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiSpinnerOverlay } from '../components/ApiSpinnerOverlay'
 import * as api from '../api'
 import './PlayGamePage.css'
-
-const SPY_KEY = 'codenamesSpyView'
 
 function colorClass(c: string): string {
   const x = c.toLowerCase()
@@ -79,27 +77,340 @@ function teamSide(team: string): 'red' | 'blue' {
   return team.toUpperCase() === 'BLUE' ? 'blue' : 'red'
 }
 
+interface TeamScore {
+  side: 'red' | 'blue'
+  revealed: number
+  total: number
+}
+
+/** Standard board: ``first_team`` holds 9 cards, opponent 8. Reveals come from ``revealed_as``. */
+function computeScores(s: api.GameSnapshot): { red: TeamScore; blue: TeamScore } {
+  const first = s.first_team?.toUpperCase() === 'BLUE' ? 'blue' : 'red'
+  const totals = { red: first === 'red' ? 9 : 8, blue: first === 'blue' ? 9 : 8 }
+  let red = 0
+  let blue = 0
+  for (const c of s.cards) {
+    if (!c.revealed_as) continue
+    const r = c.revealed_as.toLowerCase()
+    if (r === 'red') red++
+    else if (r === 'blue') blue++
+  }
+  return {
+    red: { side: 'red', revealed: red, total: totals.red },
+    blue: { side: 'blue', revealed: blue, total: totals.blue },
+  }
+}
+
+/** Fill missing ``secret_color`` on unrevealed cards from ``donor`` (same words). */
+function afterDoublePaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
+function mergeUnrevealedSecrets(surface: api.GameSnapshot, donor: api.GameSnapshot | null): api.GameSnapshot {
+  if (!donor) return surface
+  const byWord = new Map(donor.cards.map((c) => [c.word.toLowerCase(), c.secret_color]))
+  let changed = false
+  const cards = surface.cards.map((c) => {
+    if (c.revealed || c.secret_color != null) return c
+    const sec = byWord.get(c.word.toLowerCase())
+    if (sec == null) return c
+    changed = true
+    return { ...c, secret_color: sec }
+  })
+  return changed ? { ...surface, cards } : surface
+}
+
+function snapshotFreshness(s: api.GameSnapshot): [number, number, number] {
+  let revealed = 0
+  for (const c of s.cards) {
+    if (c.revealed) revealed++
+  }
+  return [s.turn_history.length, revealed, s.live_mutation_seq ?? 0]
+}
+
+function freshnessCmp(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i]
+  }
+  return 0
+}
+
+/** Prefer REST ``rest`` when it is strictly fresher than the role websocket snapshot (avoids stale WS masking a new reveal). */
+function fresherSyncedSurface(rest: api.GameSnapshot, ws: api.GameSnapshot | null): api.GameSnapshot {
+  if (!ws) return rest
+  const r = snapshotFreshness(rest)
+  const w = snapshotFreshness(ws)
+  const c = freshnessCmp(r, w)
+  if (c > 0) return rest
+  if (c < 0) return ws
+  return rest
+}
+
+function connectLiveRoleWs(
+  kind: 'guess' | 'spy',
+  token: string,
+  setSnap: (s: api.GameSnapshot) => void,
+): () => void {
+  let cancelled = false
+  let ws: WebSocket | null = null
+  const startId = window.setTimeout(() => {
+    if (cancelled) return
+    try {
+      ws = new WebSocket(api.liveWsUrl(kind, token))
+    } catch {
+      return
+    }
+    ws.onmessage = (ev) => {
+      if (cancelled) return
+      try {
+        const msg = JSON.parse(ev.data) as { state?: api.GameSnapshot; snapshot?: { state: api.GameSnapshot } }
+        const st = msg.state ?? msg.snapshot?.state
+        if (st) setSnap(st)
+      } catch {
+        /* ignore malformed */
+      }
+    }
+  }, 0)
+  return () => {
+    cancelled = true
+    window.clearTimeout(startId)
+    ws?.close()
+  }
+}
+
+const BOOTSTRAP_ICONS = 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons'
+
+function RemoteLinksModal({
+  open,
+  onClose,
+  sessionId,
+  onLivePrepared,
+}: {
+  open: boolean
+  onClose: () => void
+  sessionId: string
+  onLivePrepared: (r: api.CreateLiveRoomResponse) => void
+}) {
+  const [live, setLive] = useState<api.CreateLiveRoomResponse | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [shareErr, setShareErr] = useState<string | null>(null)
+
+  async function refresh() {
+    setSharing(true)
+    setShareErr(null)
+    try {
+      const r = await api.createLiveRoom({ session_id: sessionId })
+      setLive(r)
+      onLivePrepared(r)
+    } catch (e) {
+      setShareErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function copyLine(text: string | null) {
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="remote-links-modal-root" role="presentation">
+      <button type="button" className="remote-links-modal-scrim" aria-label="Dismiss" onClick={onClose} />
+      <div className="remote-links-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="remote-links-title">
+        <div className="remote-links-modal-header">
+          <h2 id="remote-links-title" className="remote-links-modal-title">
+            Remote links
+          </h2>
+          <button type="button" className="remote-links-modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <p className="muted remote-links-modal-intro">Same session as this tab · paste into chat · links stay stable until the room expires from idle.</p>
+        <div className="remote-links-modal-actions">
+          <button type="button" className="btn-secondary" disabled={sharing} onClick={() => refresh()}>
+            {live ? 'Refresh links' : 'Generate links'}
+          </button>
+        </div>
+        {shareErr ? <p className="error-banner">{shareErr}</p> : null}
+        {live ? (
+          <ul className="remote-links-list muted">
+            {live.guesser_url ? (
+              <li>
+                Operative (team):{' '}
+                <code className="remote-url">{live.guesser_url}</code>{' '}
+                <button
+                  type="button"
+                  className="btn-copy-url"
+                  onClick={() => copyLine(live.guesser_url)}
+                  title="Copy link"
+                  aria-label="Copy operative link"
+                >
+                  <img
+                    src={`${BOOTSTRAP_ICONS}/clipboard.svg`}
+                    className="btn-copy-url-icon"
+                    alt=""
+                    aria-hidden
+                  />
+                </button>
+              </li>
+            ) : (
+              <li>No operative link — add a human guesser to enable it.</li>
+            )}
+            {live.spymaster_url ? (
+              <li>
+                Captain (private):{' '}
+                <code className="remote-url">{live.spymaster_url}</code>{' '}
+                <button
+                  type="button"
+                  className="btn-copy-url"
+                  onClick={() => copyLine(live.spymaster_url)}
+                  title="Copy link"
+                  aria-label="Copy captain link"
+                >
+                  <img
+                    src={`${BOOTSTRAP_ICONS}/clipboard.svg`}
+                    className="btn-copy-url-icon"
+                    alt=""
+                    aria-hidden
+                  />
+                </button>
+              </li>
+            ) : (
+              <li>No captain link — add a human spymaster to enable it.</li>
+            )}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function PlayGamePage() {
-  const { gameId } = useParams<{ gameId: string }>()
-  const [spyOn, setSpyOn] = useState(() => localStorage.getItem(SPY_KEY) === '1')
+  const params = useParams<{ gameId?: string; band?: string; token?: string }>()
+  const gameId = params.gameId
+  const liveToken = params.token
+  const remoteBand = params.band === 'guess' || params.band === 'spy' ? params.band : null
+  const isRemote = !!(liveToken && remoteBand)
+
+  const [spyCaptainView, setSpyCaptainView] = useState(false)
+
   const [state, setState] = useState<api.GameSnapshot | null>(null)
+  const [liveRoomInfo, setLiveRoomInfo] = useState<api.CreateLiveRoomResponse | null>(null)
+  const [liveGuessSnap, setLiveGuessSnap] = useState<api.GameSnapshot | null>(null)
+  const [liveSpySnap, setLiveSpySnap] = useState<api.GameSnapshot | null>(null)
+  const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
   const [clueWord, setClueWord] = useState('')
   const [clueCount, setClueCount] = useState(1)
   const [dismissedEndModalFor, setDismissedEndModalFor] = useState<string | null>(null)
+  /** Remote captain link only: show key-card tint on unrevealed words; off = same board as operatives see. */
+  const [remoteCaptainKeyView, setRemoteCaptainKeyView] = useState(true)
+
+  const pollStateRef = useRef(state)
+  useEffect(() => {
+    pollStateRef.current = state
+  }, [state])
+
+  const prevPhaseSyncRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    prevPhaseSyncRef.current = null
+  }, [gameId, isRemote])
+
+  useEffect(() => {
+    if (!isRemote || remoteBand !== 'spy') return
+    const id = window.setTimeout(() => setRemoteCaptainKeyView(true), 0)
+    return () => window.clearTimeout(id)
+  }, [isRemote, remoteBand, liveToken])
+
+  /** Ensure live room + WS tokens for this session so the host stays in sync without opening the share modal. */
+  useEffect(() => {
+    if (isRemote || !gameId) return
+    let cancelled = false
+    const bootId = window.setTimeout(() => {
+      setLiveRoomInfo(null)
+      setLiveGuessSnap(null)
+      setLiveSpySnap(null)
+      ;(async () => {
+        try {
+          const r = await api.createLiveRoom({ session_id: gameId })
+          if (!cancelled) setLiveRoomInfo(r)
+        } catch {
+          /* offline / no vocab — local play still works without live sync */
+        }
+      })()
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(bootId)
+    }
+  }, [gameId, isRemote])
+
+  useEffect(() => {
+    const ph = state?.current_phase
+    if (isRemote || ph == null) return
+    if (prevPhaseSyncRef.current === ph) return
+    prevPhaseSyncRef.current = ph
+    setSpyCaptainView(ph === 'SPYMASTER')
+  }, [isRemote, state?.current_phase])
+
+  const displayState = useMemo((): api.GameSnapshot | null => {
+    if (!state) return null
+    if (isRemote) return state
+    if (!spyCaptainView) return fresherSyncedSurface(state, liveGuessSnap)
+    const primary = fresherSyncedSurface(state, liveSpySnap)
+    // REST ``state`` and spy WS can diverge; operative WS never carries secrets — merge so key card tint works.
+    return mergeUnrevealedSecrets(mergeUnrevealedSecrets(primary, state), liveSpySnap)
+  }, [state, liveGuessSnap, liveSpySnap, isRemote, spyCaptainView])
+
+  const guessWsToken = useMemo(
+    () => api.parseLiveWsToken(liveRoomInfo?.guesser_websocket_url, 'guess'),
+    [liveRoomInfo?.guesser_websocket_url],
+  )
+
+  const spyWsToken = useMemo(
+    () => api.parseLiveWsToken(liveRoomInfo?.spymaster_websocket_url, 'spy'),
+    [liveRoomInfo?.spymaster_websocket_url],
+  )
+
+  const effectiveSpyOn = useMemo(() => {
+    if (isRemote) return remoteBand === 'spy' && remoteCaptainKeyView
+    return spyCaptainView
+  }, [isRemote, remoteBand, remoteCaptainKeyView, spyCaptainView])
+
+  /** True if REST or live role WS shows AI in progress (host ``state`` can lag behind WS-only updates). */
+  const anyWaitingPoll = useMemo(() => {
+    if (isRemote) return !!state?.ui?.waiting_on_ai
+    return !!(
+      state?.ui?.waiting_on_ai ||
+      liveGuessSnap?.ui?.waiting_on_ai ||
+      liveSpySnap?.ui?.waiting_on_ai
+    )
+  }, [isRemote, state?.ui?.waiting_on_ai, liveGuessSnap?.ui?.waiting_on_ai, liveSpySnap?.ui?.waiting_on_ai])
 
   const load = useCallback(async () => {
-    if (!gameId) return
-    const s = await api.getGame(gameId, { includeSecretColors: spyOn })
-    setState(s)
-  }, [gameId, spyOn])
+    if (!gameId || isRemote) return
+    const lite = await api.getGame(gameId, { includeSecretColors: false })
+    if (lite.current_phase === 'SPYMASTER') {
+      setState(await api.getGame(gameId, { includeSecretColors: true }))
+    } else {
+      setState(lite)
+    }
+  }, [gameId, isRemote])
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      if (!gameId) return
+      if (isRemote || !gameId) return
       setLoading(true)
       setErr(null)
       try {
@@ -113,28 +424,123 @@ export function PlayGamePage() {
     return () => {
       cancelled = true
     }
-  }, [gameId, spyOn, load])
+  }, [gameId, load, isRemote])
 
   useEffect(() => {
-    if (!gameId || !state?.ui.waiting_on_ai) return
-    const id = setInterval(() => {
-      api.getGame(gameId, { includeSecretColors: spyOn }).then(setState).catch(() => {})
+    if (!isRemote || !liveToken || !remoteBand) return
+    let cancelled = false
+    let ws: WebSocket | null = null
+    const startId = window.setTimeout(() => {
+      if (cancelled) return
+      setLoading(true)
+      setErr(null)
+      /** Only the first snapshot ends the initial connect spinner; later messages must not clear ``loading`` during HTTP advance-ai / guess flows. */
+      let endedInitialRemoteLoad = false
+      const url = api.liveWsUrl(remoteBand, liveToken)
+      try {
+        ws = new WebSocket(url)
+      } catch {
+        setErr('Could not open live connection')
+        setLoading(false)
+        return
+      }
+      ws.onmessage = (ev) => {
+        if (cancelled) return
+        try {
+          const msg = JSON.parse(ev.data) as { state?: api.GameSnapshot; snapshot?: { state: api.GameSnapshot } }
+          const st = msg.state ?? msg.snapshot?.state
+          if (st) {
+            setState(st)
+            if (!endedInitialRemoteLoad) {
+              endedInitialRemoteLoad = true
+              setLoading(false)
+            }
+          }
+        } catch {
+          if (!cancelled) setErr('Invalid update from server')
+        }
+      }
+      ws.onerror = () => {
+        if (!cancelled) {
+          setErr('Live connection error')
+          setLoading(false)
+        }
+      }
+      ws.onclose = () => {
+        if (!cancelled) setLoading(false)
+      }
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(startId)
+      ws?.close()
+    }
+  }, [isRemote, remoteBand, liveToken])
+
+  useEffect(() => {
+    if (isRemote || !guessWsToken) {
+      const clearId = window.setTimeout(() => setLiveGuessSnap(null), 0)
+      return () => window.clearTimeout(clearId)
+    }
+    return connectLiveRoleWs('guess', guessWsToken, setLiveGuessSnap)
+  }, [isRemote, guessWsToken])
+
+  useEffect(() => {
+    if (isRemote || !spyWsToken) {
+      const clearId = window.setTimeout(() => setLiveSpySnap(null), 0)
+      return () => window.clearTimeout(clearId)
+    }
+    return connectLiveRoleWs('spy', spyWsToken, setLiveSpySnap)
+  }, [isRemote, spyWsToken])
+
+  useEffect(() => {
+    if (isRemote || !gameId || !anyWaitingPoll) return
+    const id = window.setInterval(() => {
+      if (!gameId) return
+      const cur = pollStateRef.current
+      const sec = cur?.current_phase === 'SPYMASTER'
+      api.getGame(gameId, { includeSecretColors: sec }).then(setState).catch(() => {})
     }, 1200)
-    return () => clearInterval(id)
-  }, [gameId, spyOn, state?.ui.waiting_on_ai])
+    return () => window.clearInterval(id)
+  }, [gameId, isRemote, anyWaitingPoll])
+
+  /** Key card view needs ``secret_color`` on unrevealed cells; REST omits them outside optional fetches / spy WS. */
+  useEffect(() => {
+    if (isRemote || !gameId || !state || state.is_over || !spyCaptainView) return
+    const missing = state.cards.some((c) => !c.revealed && c.secret_color == null)
+    if (!missing) return
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      api
+        .getGame(gameId, { includeSecretColors: true })
+        .then((s) => {
+          if (!cancelled) setState(s)
+        })
+        .catch(() => {})
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [isRemote, gameId, spyCaptainView, state])
 
   const historyRounds = useMemo(
-    () => buildHistoryRounds(state?.turn_history ?? []),
-    [state?.turn_history],
+    () => buildHistoryRounds(displayState?.turn_history ?? []),
+    [displayState?.turn_history],
   )
 
   const analysisHref = useMemo(() => {
-    if (!state) return '/analysis'
-    return `/analysis?${new URLSearchParams({ seed: String(state.seed), risk: String(state.risk) }).toString()}`
-  }, [state])
+    if (!displayState) return '/analysis'
+    return `/analysis?${new URLSearchParams({ seed: String(displayState.seed), risk: String(displayState.risk) }).toString()}`
+  }, [displayState])
+
+  function includeSecretsForApi(): boolean {
+    const s = pollStateRef.current
+    return !!(s && !s.is_over && s.current_phase === 'SPYMASTER')
+  }
 
   async function run<T>(fn: () => Promise<T>): Promise<void> {
-    setBusy(true)
+    setLoading(true)
     setErr(null)
     try {
       const next = await fn()
@@ -142,82 +548,228 @@ export function PlayGamePage() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      queueMicrotask(() => setLoading(false))
     }
   }
 
   async function onSpymaster(e: React.FormEvent) {
     e.preventDefault()
-    if (!gameId) return
-    await run(() => api.postSpymaster(gameId, { word: clueWord.trim(), count: clueCount }, spyOn))
+    const body = { word: clueWord.trim(), count: clueCount }
+    if (isRemote) {
+      if (!liveToken || remoteBand !== 'spy') return
+      await run(() => api.postLiveSpymaster(liveToken, body))
+    } else {
+      if (!gameId) return
+      await run(() => api.postSpymaster(gameId, body, includeSecretsForApi()))
+    }
     setClueWord('')
   }
 
   async function onCardGuess(word: string) {
-    if (!gameId) return
-    await run(() => api.postGuesses(gameId, [word], spyOn))
+    setErr(null)
+    try {
+      if (isRemote) {
+        if (!liveToken) return
+        const afterGuess = await api.postLiveGuesses(liveToken, [word])
+        setState(afterGuess)
+        await afterDoublePaint()
+        setLoading(true)
+        const finalSnap = await api.postLiveAdvanceAi(liveToken)
+        setState(finalSnap)
+      } else {
+        if (!gameId) return
+        const incGuess = includeSecretsForApi()
+        const afterGuess = await api.postGuesses(gameId, [word], incGuess)
+        setState(afterGuess)
+        await afterDoublePaint()
+        setLoading(true)
+        const finalSnap = await api.postAdvanceAi(gameId, spyCaptainView)
+        setState(finalSnap)
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function onEndTurn() {
+    if (isRemote) {
+      if (!liveToken) return
+      setErr(null)
+      try {
+        const afterEnd = await api.postLiveEndGuessTurn(liveToken)
+        setState(afterEnd)
+        await afterDoublePaint()
+        setLoading(true)
+        const finalSnap = await api.postLiveAdvanceAi(liveToken)
+        setState(finalSnap)
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
     if (!gameId) return
-    await run(() => api.postEndGuessTurn(gameId, spyOn))
+    setErr(null)
+    try {
+      const incGuess = includeSecretsForApi()
+      const afterEnd = await api.postEndGuessTurn(gameId, incGuess)
+      setState(afterEnd)
+      await afterDoublePaint()
+      setLoading(true)
+      const finalSnap = await api.postAdvanceAi(gameId, spyCaptainView)
+      setState(finalSnap)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
   }
 
-  if (!gameId) return <p>Missing game id.</p>
-
-  const showSpinner = loading || busy
+  if (!isRemote && !gameId) return <p>Missing game id.</p>
+  if (isRemote && (!liveToken || !remoteBand)) return <p>Invalid remote link.</p>
 
   if (err && !state && !loading) return <div className="error-banner">{err}</div>
   if (!state && loading) {
     return <ApiSpinnerOverlay visible message="Loading game…" />
   }
-  if (!state) return null
+  if (!state || !displayState) return null
 
-  const phase = state.current_phase
-  const clue = state.latest_clue
+  const phase = displayState.current_phase
+  const clue = displayState.latest_clue
   const guesserIdle = phase !== 'GUESSER' || !clue || (clue.word === '' && clue.count === 0)
   const activeClue =
     phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0)
-  const teamKey = teamSide(state.current_team)
-  const showSpymasterForm = state.ui.show_spymaster_form
-  const cluePanelIdle = guesserIdle && !showSpymasterForm
-  const cluePanelActive = activeClue || showSpymasterForm
+  const teamKey = teamSide(displayState.current_team)
+  const showSpymasterForm = displayState.ui.show_spymaster_form
+  /** Remote operative link never submits clues; only the captain link shows the form. */
+  const showSpymasterFormUi = showSpymasterForm && (!isRemote || remoteBand === 'spy')
+  const cluePanelIdle = guesserIdle && !showSpymasterFormUi
+  const cluePanelActive = activeClue || showSpymasterFormUi
 
-  const fx = state.guess_flash
-  const showEndModal = state.is_over && dismissedEndModalFor !== state.id
-  const winnerTeam = state.winner ? state.winner.toUpperCase() : 'Unknown'
+  const fx = displayState.guess_flash
+  const showEndModal = displayState.is_over && dismissedEndModalFor !== displayState.id
+  const winnerTeam = displayState.winner ? displayState.winner.toUpperCase() : 'Unknown'
+  const aiBusy = !!(
+    displayState?.ui?.waiting_on_ai ||
+    (!isRemote && (liveGuessSnap?.ui?.waiting_on_ai || liveSpySnap?.ui?.waiting_on_ai))
+  )
+  const blockingUi = loading || aiBusy
 
   return (
-    <div className={`play-root play-page${spyOn ? ' spy-on' : ''}`}>
-      <ApiSpinnerOverlay visible={showSpinner} message={loading ? 'Loading game…' : 'Updating…'} />
+    <div
+      className={`play-root play-page${effectiveSpyOn ? ' spy-on' : ''}`}
+      aria-busy={blockingUi || undefined}
+    >
+      <RemoteLinksModal
+        open={remoteModalOpen && !isRemote}
+        onClose={() => setRemoteModalOpen(false)}
+        sessionId={displayState.id}
+        onLivePrepared={setLiveRoomInfo}
+      />
+      <ApiSpinnerOverlay
+        visible={loading || aiBusy}
+        message="Waiting for AI…"
+      />
       {fx?.kind === 'team' ? <div className="fx-celebrate" aria-hidden /> : null}
       {fx?.kind === 'other' || fx?.kind === 'assassin' ? <div className="fx-oops" aria-hidden /> : null}
 
-      <h1 className="page-title">
-        Game <code>{state.id}</code>
-      </h1>
+      <div className="play-title-row">
+        <h1 className="page-title">
+          {isRemote ? (
+            remoteBand === 'guess' ? (
+              <>Remote · operative</>
+            ) : (
+              <>Remote · captain · session <code>{displayState.id}</code></>
+            )
+          ) : (
+            <>
+              Game <code>{displayState.id}</code>
+            </>
+          )}
+        </h1>
+        <div className="play-title-right">
+          {(() => {
+            const { red, blue } = computeScores(displayState)
+            return (
+              <div className="score-chips" aria-label="Team scores">
+                <span className="score-chip score-chip--blue">
+                  <span className="score-chip__label">BLUE</span>
+                  <span className="score-chip__value">
+                    {blue.revealed}/{blue.total}
+                  </span>
+                </span>
+                <span className="score-chip score-chip--red">
+                  <span className="score-chip__label">RED</span>
+                  <span className="score-chip__value">
+                    {red.revealed}/{red.total}
+                  </span>
+                </span>
+              </div>
+            )
+          })()}
+          {!isRemote ? (
+            <button
+              type="button"
+              className="btn-remote-links"
+              onClick={() => setRemoteModalOpen(true)}
+              title="Remote play links"
+              aria-label="Remote play links"
+            >
+              <img
+                src={`${BOOTSTRAP_ICONS}/cloud.svg`}
+                className="btn-remote-links-icon"
+                alt=""
+                aria-hidden
+              />
+            </button>
+          ) : null}
+        </div>
+      </div>
       {err ? <div className="error-banner">{err}</div> : null}
 
       <div className="play-toolbar">
-        <label className="spy-toggle">
-          <input
-            type="checkbox"
-            checked={spyOn}
-            onChange={(e) => {
-              localStorage.setItem(SPY_KEY, e.target.checked ? '1' : '0')
-              setSpyOn(e.target.checked)
-            }}
-          />
-          Spymaster view (show hidden colors)
-        </label>
+        {isRemote ? (
+          <>
+            <span className="muted status-line remote-role-hint">
+              {remoteBand === 'guess' ? 'Operative view' : 'Captain view'}
+            </span>
+            {remoteBand === 'spy' ? (
+              <>
+                <label className="spy-toggle">
+                  <input
+                    type="checkbox"
+                    checked={remoteCaptainKeyView}
+                    onChange={(e) => setRemoteCaptainKeyView(e.target.checked)}
+                  />
+                  Reveal Cards
+                </label>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <label className="spy-toggle">
+              <input
+                type="checkbox"
+                checked={spyCaptainView}
+                onChange={(e) => setSpyCaptainView(e.target.checked)}
+              />
+              Reveal Cards
+            </label>
+            <span className="muted status-line spy-phase-hint">Switches automatically each phase · toggle to peek.</span>
+          </>
+        )}
         <span className="status-line">
-          Team: <span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team}</span> ·
-          Phase: <strong>{state.current_phase}</strong>
-          {state.winner ? (
+          Team: <span className={`history-team-tag history-team-tag--${teamKey}`}>{displayState.current_team}</span> ·
+          Phase: <strong>{displayState.current_phase}</strong>
+          {displayState.winner ? (
             <>
               {' '}
               · Winner:{' '}
-              <span className={`history-team-tag history-team-tag--${teamSide(state.winner)}`}>{state.winner}</span>
+              <span className={`history-team-tag history-team-tag--${teamSide(displayState.winner)}`}>{displayState.winner}</span>
             </>
           ) : null}
         </span>
@@ -226,16 +778,13 @@ export function PlayGamePage() {
       <div
         className={`clue-panel${cluePanelIdle ? ' idle' : ''}${cluePanelActive ? ` clue-panel--active clue-panel--team-${teamKey}` : ''}`}
       >
-        <div className={`clue-panel-inner${showSpymasterForm ? ' clue-panel-inner--spymaster' : ''}`}>
-          {showSpymasterForm ? (
+        <div className={`clue-panel-inner${showSpymasterFormUi ? ' clue-panel-inner--spymaster' : ''}`}>
+          {showSpymasterFormUi ? (
             <div className="clue-spymaster-block">
               <div className="clue-label clue-label--row">
                 Your clue
-                <span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team} spymaster</span>
+                <span className={`history-team-tag history-team-tag--${teamKey}`}>{displayState.current_team} spymaster</span>
               </div>
-              <p className="clue-spymaster-hint muted">
-                If the guesser is AI, the clue word must exist in the embedding matrix (use common English words).
-              </p>
               <form className="clue-spymaster-form" onSubmit={onSpymaster}>
                 <label>
                   Word{' '}
@@ -258,7 +807,7 @@ export function PlayGamePage() {
                     required
                   />
                 </label>
-                <button type="submit" className="btn-primary" disabled={busy}>
+                <button type="submit" className="btn-primary" disabled={blockingUi}>
                   Give clue
                 </button>
               </form>
@@ -277,9 +826,9 @@ export function PlayGamePage() {
                       {clue.word}
                       <span className="clue-count">{clue.count}</span>
                     </div>
-                    {state.guesser_attempts_remaining != null ? (
+                    {displayState.guesser_attempts_remaining != null ? (
                       <div className="attempts-badge">
-                        Guesses remaining this clue: {state.guesser_attempts_remaining}
+                        Guesses remaining this clue: {displayState.guesser_attempts_remaining}
                       </div>
                     ) : null}
                   </>
@@ -294,8 +843,8 @@ export function PlayGamePage() {
                   </div>
                 )}
               </div>
-              {state.ui.show_end_turn ? (
-                <button type="button" className="end-turn-btn" disabled={busy} onClick={() => onEndTurn()}>
+              {displayState.ui.show_end_turn ? (
+                <button type="button" className="end-turn-btn" disabled={blockingUi} onClick={() => onEndTurn()}>
                   End turn
                 </button>
               ) : null}
@@ -306,10 +855,13 @@ export function PlayGamePage() {
 
       <div className="board-outer">
         <div className="board-wrap">
-          {state.cards.map((c) => {
+          {displayState.cards.map((c) => {
             const back = c.revealed && c.revealed_as ? colorClass(c.revealed_as) : colorClass('neutral')
-            const sec = secretAttr(c, spyOn)
-            const can = state.ui.can_click_guess && !c.revealed
+            const sec = secretAttr(c, effectiveSpyOn)
+            const can =
+              displayState.ui.can_click_guess &&
+              !c.revealed &&
+              (!isRemote || remoteBand === 'guess')
             return (
               <div
                 key={c.word}
@@ -320,7 +872,7 @@ export function PlayGamePage() {
                   <button
                     type="button"
                     className="card-hit"
-                    disabled={busy}
+                    disabled={blockingUi}
                     aria-label={`Guess ${c.word}`}
                     onClick={() => onCardGuess(c.word)}
                   />
@@ -406,17 +958,21 @@ export function PlayGamePage() {
         )}
       </div>
 
-      {state.ui.waiting_on_ai ? <p className="status-line muted">Waiting on AI…</p> : null}
+      {displayState.ui.waiting_on_ai ? <p className="status-line muted">Waiting on AI…</p> : null}
 
-      <footer className="play-footer">
-        <p className="session-meta muted">
-          Session: <code>{state.id}</code> · Seed: <code>{state.seed}</code>
-        </p>
-        <div className="play-footer-links">
-          <Link to={analysisHref}>Analyze this board</Link>
-          {state.is_over ? <Link to="/play">New game</Link> : null}
-        </div>
-      </footer>
+      {isRemote && remoteBand === 'guess' ? null : (
+        <footer className="play-footer">
+          <p className="session-meta muted">
+            Session: <code>{displayState.id}</code> · Seed: <code>{displayState.seed}</code>
+            {isRemote ? <span> · Updates sync live while this tab is open.</span> : null}
+            {!isRemote && (guessWsToken || spyWsToken) ? <span> · Live sync enabled for remote players.</span> : null}
+          </p>
+          <div className="play-footer-links">
+            <Link to={analysisHref}>Analyze this board</Link>
+            {displayState.is_over ? <Link to="/play">New game</Link> : null}
+          </div>
+        </footer>
+      )}
 
       {showEndModal ? (
         <div className="endgame-modal-backdrop" role="presentation">
@@ -424,10 +980,10 @@ export function PlayGamePage() {
             <h2 id="endgame-modal-title">Game over</h2>
             <p className="endgame-modal__winner">
               <span className={`history-team-tag history-team-tag--${teamSide(winnerTeam)}`}>{winnerTeam}</span> wins{' '}
-              {winnerReasonText(state.win_reason)}
+              {winnerReasonText(displayState.win_reason)}
             </p>
             <p className="muted endgame-modal__seed">
-              Replay or analyze this same game with seed <code>{state.seed}</code>.
+              Replay or analyze this same game with seed <code>{displayState.seed}</code>.
             </p>
             <p className="muted endgame-modal__hint">
               The Open analysis button pre-fills seed and risk so Spymaster Analysis samples the same board layout.
@@ -439,7 +995,19 @@ export function PlayGamePage() {
               <Link to={analysisHref} className="btn-secondary">
                 Open analysis
               </Link>
-              <button type="button" className="btn-secondary" onClick={() => setDismissedEndModalFor(state.id)}>
+              {isRemote && remoteBand === 'spy' && liveToken ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={blockingUi}
+                  onClick={() =>
+                    run(() => api.postLiveRematch(liveToken))
+                  }
+                >
+                  Rematch · same captain link
+                </button>
+              ) : null}
+              <button type="button" className="btn-secondary" onClick={() => setDismissedEndModalFor(displayState.id)}>
                 Close
               </button>
             </div>

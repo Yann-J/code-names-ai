@@ -35,6 +35,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/play" element={<PlayNewPage />} />
           <Route path="/play/:gameId" element={<PlayGamePage />} />
+          <Route path="/remote/:band/:token" element={<PlayGamePage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
         </Routes>
       </main>

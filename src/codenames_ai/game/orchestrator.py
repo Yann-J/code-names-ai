@@ -11,6 +11,7 @@ from codenames_ai.game.state import (
     TurnEvent,
     TurnPhase,
     check_win,
+    prior_clue_surfaces_lower,
     reveal_card,
 )
 
@@ -105,13 +106,7 @@ class Game:
     def _step_spymaster(self) -> None:
         team = self.state.current_team
         spymaster: Spymaster = self._players[(team, "spymaster")]  # type: ignore[assignment]
-        prior_clues = frozenset(
-            ev.clue.word.lower()
-            for ev in self.state.turn_history
-            if ev.kind == "CLUE"
-            and ev.clue is not None
-            and not ev.clue.is_pass()
-        )
+        prior_clues = prior_clue_surfaces_lower(self.state.turn_history)
         view = SpymasterView(
             board=self.state.board, team=team, prior_clue_words=prior_clues
         )
