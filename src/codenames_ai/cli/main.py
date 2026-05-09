@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from codenames_ai.embedding.download import download_fasttext
 from codenames_ai.eval.metrics import aggregate, compare
 from codenames_ai.eval.persist import save_records
 from codenames_ai.eval.tournament import run_tournament
+from codenames_ai.learn import LeagueConfig, run_league_learning
 from codenames_ai.storage import StoragePaths
 
 
@@ -139,6 +141,39 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_learn_league(args: argparse.Namespace) -> int:
+    app = Config()
+    cfg_path = Path(args.config).resolve()
+    eval_cfg, digest = load_eval_yaml(cfg_path)
+    league_cfg = LeagueConfig(
+        generations=args.generations,
+        jobs=args.jobs,
+        verbose=args.verbose,
+    )
+    root = Path(args.output_dir).resolve()
+    run_dir = run_league_learning(
+        app_cfg=app,
+        eval_cfg=eval_cfg,
+        eval_config_hash=digest,
+        league_cfg=league_cfg,
+        seed=args.seed,
+        root_dir=root,
+        run_id=args.run_id,
+        resume=args.resume,
+        cli_args={
+            "config": str(cfg_path),
+            "generations": args.generations,
+            "seed": args.seed,
+            "jobs": args.jobs,
+            "output_dir": str(root),
+            "run_id": args.run_id,
+            "resume": args.resume,
+        },
+    )
+    print(f"done: {run_dir}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="codenames-ai",
@@ -217,6 +252,35 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8000)
     sv.set_defaults(func=cmd_serve)
+
+    ll = sub.add_parser("learn-league", help="Tune spymaster scoring via league self-play")
+    ll.add_argument(
+        "--config",
+        required=True,
+        metavar="PATH",
+        help="Base eval YAML used for vocab/runtime and fixed non-learned settings",
+    )
+    ll.add_argument("--generations", type=int, default=30)
+    ll.add_argument("--seed", type=int, default=0, help="Global RNG seed")
+    ll.add_argument(
+        "--jobs",
+        type=int,
+        default=max(1, ((os.cpu_count() or 2) - 1)),
+        help="Parallel worker processes (default: cpu_count-1)",
+    )
+    ll.add_argument(
+        "--output-dir",
+        default="./league",
+        help="Artifact root directory (default: ./league)",
+    )
+    ll.add_argument("--run-id", default=None, help="Explicit run directory name under output-dir")
+    ll.add_argument(
+        "--resume",
+        default=None,
+        metavar="RUN_ID",
+        help="Resume from output-dir/RUN_ID checkpoint_latest.json",
+    )
+    ll.set_defaults(func=cmd_learn_league)
 
     return p
 
