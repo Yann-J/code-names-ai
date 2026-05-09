@@ -8,20 +8,6 @@ import { PlayNewPage } from './pages/PlayNewPage'
 export default function App() {
   return (
     <BrowserRouter basename="/app">
-      <a
-        className="github-corner"
-        href="https://github.com/Yann-J/code-names-ai"
-        target="_blank"
-        rel="noreferrer"
-        aria-label="View on GitHub"
-      >
-        <img
-          src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/github.svg"
-          alt=""
-          aria-hidden="true"
-        />
-        <span>View on GitHub</span>
-      </a>
       <header className="app-header">
         <strong>Word Guess AI</strong>
         <nav className="app-nav">
@@ -29,6 +15,20 @@ export default function App() {
           <NavLink to="/play">New game</NavLink>
           <NavLink to="/analysis">Analysis</NavLink>
         </nav>
+        <a
+          className="github-corner"
+          href="https://github.com/Yann-J/code-names-ai"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View on GitHub"
+        >
+          <img
+            src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/github.svg"
+            alt=""
+            aria-hidden="true"
+          />
+          <span>View on GitHub</span>
+        </a>
       </header>
       <main className="app-main">
         <Routes>

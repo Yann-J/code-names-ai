@@ -138,37 +138,42 @@ export async function postEndGuessTurn(
   return r.json()
 }
 
+export interface RiskSnapshotPayload {
+  base_risk: number
+  effective_risk: number
+  delta_objectives: number
+  ours_unrevealed: number
+  theirs_unrevealed: number
+  dynamic_enabled: boolean
+}
+
+export interface AnalysisTracePayload {
+  chosen: { clue: string; n: number; targets: string[] } | null
+  top_candidates: Array<{
+    clue: string
+    targets: string[]
+    n: number
+    score: number
+    embedding_score: number
+    components: {
+      expected_reward_raw: number
+      friendly_min_sim: number
+      total: number
+    }
+    margin: number
+    zipf: number
+    llm_score: number | null
+    llm_reason: string | null
+  }>
+  veto_count: number
+  illegal_count: number
+  risk_snapshot?: RiskSnapshotPayload | null
+}
+
 export interface AnalysisResponse {
   seed: number
   risk: number
-  traces: Record<string, {
-    chosen: { clue: string; n: number; targets: string[] } | null
-    top_candidates: Array<{
-      clue: string
-      targets: string[]
-      n: number
-      score: number
-      embedding_score: number
-      components: {
-        friendly_min_sim: number
-        ambition_bonus: number
-        margin_bonus: number
-        freq_bonus: number
-        assassin_penalty: number
-        opponent_penalty: number
-        expected_reward_bonus: number
-        expected_reward_raw: number
-        undercluster_penalty: number
-        total: number
-      }
-      margin: number
-      zipf: number
-      llm_score: number | null
-      llm_reason: string | null
-    }>
-    veto_count: number
-    illegal_count: number
-  }>
+  traces: Record<string, AnalysisTracePayload>
   board: Array<{ word: string; color: string }>
   first_team: string
 }

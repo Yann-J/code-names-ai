@@ -246,15 +246,10 @@ def build_game_snapshot(
 
 
 class ScoreComponentsPayload(BaseModel):
-    friendly_min_sim: float
-    ambition_bonus: float
-    margin_bonus: float
-    freq_bonus: float
-    assassin_penalty: float
-    opponent_penalty: float
-    expected_reward_bonus: float
+    """Embedding score diagnostics; ``total`` equals MC expected reward (EV)."""
+
     expected_reward_raw: float
-    undercluster_penalty: float = 0.0
+    friendly_min_sim: float = 0.0
     total: float
 
 
@@ -277,11 +272,21 @@ class ChosenPayload(BaseModel):
     targets: tuple[str, ...]
 
 
+class RiskSnapshotPayload(BaseModel):
+    base_risk: float
+    effective_risk: float
+    delta_objectives: float
+    ours_unrevealed: int
+    theirs_unrevealed: int
+    dynamic_enabled: bool
+
+
 class SpymasterTracePayload(BaseModel):
     chosen: ChosenPayload | None
     top_candidates: list[CandidatePayload]
     veto_count: int
     illegal_count: int
+    risk_snapshot: RiskSnapshotPayload | None = None
 
 
 class AnalysisBoardCard(BaseModel):
@@ -303,6 +308,18 @@ class AnalysisRequestBody(BaseModel):
 
 
 def spymaster_trace_to_payload(trace: SpymasterTrace) -> SpymasterTracePayload:
+    rs_payload: RiskSnapshotPayload | None = None
+    if trace.risk_snapshot is not None:
+        rs = trace.risk_snapshot
+        rs_payload = RiskSnapshotPayload(
+            base_risk=rs.base_risk,
+            effective_risk=rs.effective_risk,
+            delta_objectives=rs.delta_objectives,
+            ours_unrevealed=rs.ours_unrevealed,
+            theirs_unrevealed=rs.theirs_unrevealed,
+            dynamic_enabled=rs.dynamic_enabled,
+        )
+
     def cand(c: Candidate) -> CandidatePayload:
         comp = c.components
         return CandidatePayload(
@@ -312,15 +329,8 @@ def spymaster_trace_to_payload(trace: SpymasterTrace) -> SpymasterTracePayload:
             score=c.score,
             embedding_score=c.embedding_score,
             components=ScoreComponentsPayload(
-                friendly_min_sim=comp.friendly_min_sim,
-                ambition_bonus=comp.ambition_bonus,
-                margin_bonus=comp.margin_bonus,
-                freq_bonus=comp.freq_bonus,
-                assassin_penalty=comp.assassin_penalty,
-                opponent_penalty=comp.opponent_penalty,
-                expected_reward_bonus=comp.expected_reward_bonus,
                 expected_reward_raw=comp.expected_reward_raw,
-                undercluster_penalty=comp.undercluster_penalty,
+                friendly_min_sim=comp.friendly_min_sim,
                 total=comp.total,
             ),
             margin=c.margin,
@@ -338,4 +348,5 @@ def spymaster_trace_to_payload(trace: SpymasterTrace) -> SpymasterTracePayload:
         top_candidates=[cand(x) for x in trace.top_candidates],
         veto_count=trace.veto_count,
         illegal_count=trace.illegal_count,
+        risk_snapshot=rs_payload,
     )

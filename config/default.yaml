@@ -1,90 +1,121 @@
-# Canonical eval/serve config template with schema defaults.
-# Schema source: src/codenames_ai/cli/eval_config.py (EvalAgentConfigFile).
+# Canonical eval/serve config: explicit defaults for every key in EvalAgentConfigFile and
+# nested models. Field order follows src/codenames_ai/cli/eval_config.py.
+#
+# Scoring vetoes / MC softmax / rewards below match ScoringWeights.from_risk(base_risk) at the
+# current `risk.base_risk` (here 0.5). In code, setting any of these back to null re-derives from
+# `risk.base_risk` at load time. Child configs that change `risk.base_risk` should set those four vetoes to
+# null under `scoring:` (or replace with values for their risk) — see config/base.yaml.
+#
+# Inheritance: optional `extends` lists YAML file(s) merged before this file
+# (each path is relative to the file that contains `extends`). This file overrides
+# parents; later parents in a list override earlier ones.
 
-# Human-readable name for eval comparison tables / parquet rows.
+---
+# -- EvalAgentConfigFile --
+# Short name for eval comparison tables and parquet metadata rows.
 label: default
 
-# Risk 0–1: cautious ↔ aggressive (margin vetoes, ambition, assassin weight, guesser stop policy).
-risk: 0.5
+# Risk settings: `base_risk` in [0, 1] → looser clue vetoes, warmer MC softmax, and a
+# guesser that stops guesses sooner when confidence is low. Values under scoring that
+# match from_risk(base_risk) should stay in sync when you change this, or set those keys to
+# null to recompute from base_risk in the agent runtime.
+risk:
+  base_risk: 0.5
 
-# Vocabulary filters + language selection.
+# Dynamic risk (#1): board-aware Δ (opponent unrevealed − ours). When enabled,
+# effective_risk = clamp(base_risk·exp(−s·Δ), …) nudges margin_floor /
+# assassin_ceiling / guesser stops. Matches static behaviour when disabled.
+dynamic_risk:
+  enabled: false
+  s: 0.12
+  min_risk: 0.0
+  max_risk: 1.0
+  beta_margin_floor: 0.25
+  beta_assassin_ceiling: 0.25
+  beta_confidence_floor: 0.25
+  beta_bonus_gap: 0.25
+
+# -- VocabularyConfig --
 vocabulary:
-  # Language code for vocab + fastText model (e.g. en -> cc.en.300.bin).
+  # fastText + lexicon language code (e.g. en → cc.en.300.bin).
   language: en
 
-  # Board-card word frequency window (Zipf).
+  # No exclusions file: omit this key (schema default). Set to a path string for one word
+  # per line; relative paths resolve against the directory of the YAML path on the CLI.
+  exclusions_path: ../data/exclusions/en
+
+  # Board card words: Zipf frequency window and spaCy coarse POS tags (UD-style).
   game:
     zipf:
       min: 4.0
       max: 6.5
-    # spaCy coarse POS tags allowed in game cards.
-    allowed_pos: [NOUN]
+    allowed_pos:
+      - NOUN
 
-  # Clue-vocabulary frequency window (Zipf).
+  # Clue-candidate pool: wider Zipf band and more POS than game cards.
   clue:
     zipf:
       min: 3.0
       max: 7.0
-    # spaCy coarse POS tags allowed in clue pool.
-    allowed_pos: [NOUN, ADJ, VERB]
+    allowed_pos:
+      - NOUN
+      - ADJ
+      - VERB
 
-# Optional path to a one-word-per-line exclusion file.
-exclusions_path: null
-
-# After embedding scoring: how many top candidates are sent to the spymaster LLM reranker.
-embedding_top_k: 20
-
-# How many ranked (clue, N, targets) candidates to keep in traces / Analysis API after rerank.
+# How many ranked (clue, N, targets) rows to keep in traces and the Analysis API
+# after reranking (not the same as the LLM rerank shortlist below).
 top_k_trace: 200
 
+# -- GuesserConfig --
 guesser:
-  # Extra candidates passed to the guesser LLM beyond N.
+  # Board candidates shown to the guesser LLM beyond the clue count N (ranking context).
   extra_candidates: 3
 
+  # Stochastic guess selection: 0 = always pick the top-ranked card; >0 applies softmax
+  # over logits. Ignored when the guesser is fully deterministic / no rerank path.
+  sampling_temperature: 0.0
+
+  # With stochastic guesses, sample only from this many top-ranked unrevealed cards; 0 = all.
+  sampling_top_k: 0
+
+# -- ScoringConfig (resolved for risk = 0.5 via ScoringWeights.from_risk) --
 scoring:
-  # If true, blend embedding scores with LLM rerank for spymaster + guesser (requires LLM_KEY).
+  # When true and LLM credentials exist, blend embedding EV with LLM confidence for
+  # spymaster and guesser; requires LLM_KEY for full runtime.
   llm_rerank: true
 
-  # Blend weight alpha in final score: alpha*normalized_embedding + (1-alpha)*LLM.
+  # Final spymaster score mixes MC expected value and LLM: alpha * EV + (1-alpha) * (LLM * N_eff).
   blend_alpha: 0.5
 
-  # Soft minimum friendly targets per clue (capped by friendlies on board).
-  prefer_min_targets: 3
+  # Hard veto: minimum margin for a candidate to survive.
+  margin_floor: 0.05
 
-  # Monte Carlo expected-reward weight in spymaster scoring.
-  expected_reward_weight: 1.10
+  # Hard veto: max assassin similarity before the clue is rejected.
+  assassin_ceiling: 0.35
 
-  # Optional explicit scoring overrides (null = derived from risk / internal defaults).
-  ambition_weight: null
-  margin_weight: null
-  freq_weight: null
-  assassin_weight: null
-  opponent_weight: null
-  undercluster_penalty_weight: null
-  margin_floor: null
-  assassin_ceiling: null
-  mc_temperature: null
-  # Extra rank sharpening in EV rollout pick sampling (0 disables rank bias).
-  mc_rank_bias: null
-  reward_friendly: null
-  reward_neutral: null
-  reward_opponent: null
-  reward_assassin: null
+  # MC rollout: divides similarity logits before softmax.
+  mc_temperature: 0.18
 
-  # Rollouts per (clue, N) candidate used to estimate expected reward.
+  # MC softmax: subtract bias * log1p(rank-by-similarity) from logits.
+  mc_rank_bias: 1.3
+
+  # Monte Carlo per-pick rewards (same for all risk when taken from from_risk defaults).
+  reward_friendly: 1.0
+  reward_neutral: -0.35
+  reward_opponent: -0.8
+  reward_assassin: -3.0
+
+  # Fixed MC trial counts before adaptive refinement.
   mc_trials: 96
-
-  # Adaptive EV estimation: run more trials for near-best lane contenders.
   adaptive_mc_base_trials: 64
   adaptive_mc_extra_trials: 96
+
+  # If a candidate’s EV is within this band of the best, run extra MC trials.
   adaptive_mc_ev_band: 0.10
 
-  # Lane targets for N=1..7 shortlist construction (normalized internally).
-  lane_target_fractions: [0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01]
-  lane_quality_delta_ev: 0.20
+  # Maximum clue target count N considered per candidate (prefix length cap).
   lane_max_n: 7
 
-  # EV-modulated LLM rerank:
-  # llm_adj = llm * (1 + gain * tanh((ev - median_ev)/temperature))
-  ev_llm_gain: 0.35
-  ev_llm_temperature: 0.20
+  # After embedding / EV shortlisting, how many candidates are passed to the spymaster LLM
+  # reranker (ignored if llm_rerank is false).
+  embedding_top_k: 20

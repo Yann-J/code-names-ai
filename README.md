@@ -1,6 +1,6 @@
-# Code Names AI
+# Word Guess AI
 
-A Python package that plays the word game [Code Names](https://en.wikipedia.org/wiki/Codenames) with AI agents that combine **fastText embeddings** and **LLM reranking**. Use it as a research tool in a Jupyter notebook, run headless self-play tournaments to measure bot quality, or spin up a local web UI to play against (or alongside) the AI.
+A Python package that plays a word guessing game with AI agents that combine **fastText embeddings** and **LLM reranking**.
 
 ## Play the demo
 
@@ -17,7 +17,7 @@ Two vocabularies are built from [wordfreq](https://github.com/rspeer/wordfreq) Z
 - **Game-word vocabulary** — Zipf 4–6.5, nouns only (~500–2000 common concrete nouns for board cards).
 - **Clue-word vocabulary** — Zipf 3–7, nouns + adjectives + verbs (~30–60 K candidate clue words).
 
-Both are filtered with a configurable profanity exclusion list (default for English at `./data/exclusions/en.txt`, taken from this [public GitHub list](https://github.com/dsojevic/profanity-list/blob/main/en.txt))
+Both are filtered with a configurable profanity exclusion list (default for English at `./data/exclusions/en` from the [LDNOOBW bad-words submodule](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words))
 
 Both compiled vocabularies are cached as Parquet files under `~/.cache/codenames_ai/vocab/`.
 
@@ -74,8 +74,11 @@ A single `risk` scalar in `[0, 1]` simultaneously tunes:
 ## Installation
 
 ```bash
-git clone <repo>
+git clone --recurse-submodules <repo>
 cd code-names-ai
+
+# If you cloned without submodules:
+# git submodule update --init --recursive
 
 # Install the package and its dependencies
 uv pip install -e ".[dev]"
@@ -189,123 +192,13 @@ docker compose run --rm app codenames-ai download fasttext --lang en
 docker build -t codenames-ai:latest .
 ```
 
-GitHub Actions (`.github/workflows/docker.yml`) builds the image on every push and pull request with buildx GHA cache. On non-PR events it pushes to **GitHub Container Registry** at `ghcr.io/<owner>/<repo>`, tagged with the short SHA, the branch name, and `latest` on the default branch.
-
-On `main`/`master` pushes it also deploys: the workflow renders `.env` from GitHub secrets, uploads it together with `docker-compose.yml` to the deploy host, then SSHes in to `docker login ghcr.io` (using the workflow's ephemeral `GITHUB_TOKEN`), `docker compose pull`, and `docker compose up -d --remove-orphans`. Required repo secrets:
-
 | Secret | Purpose |
 |---|---|
-| `DEPLOY_HOST` | hostname of the deploy server |
-| `DEPLOY_USER` | SSH user |
-| `DEPLOY_PORT` | optional, defaults to `22` |
-| `DEPLOY_SSH_KEY` | private key for `DEPLOY_USER` |
-| `DEPLOY_PATH` | absolute directory on the host where compose file + `.env` are written |
 | `LLM_API` | LLM endpoint (e.g. `https://api.openai.com/v1`) |
 | `LLM_MODEL` | LLM model name (e.g. `gpt-4o-mini`) |
 | `LLM_KEY` | API key for the LLM endpoint |
 
 > The compose file references `ghcr.io/yann-j/code-names-ai:latest` by default; override per environment with `IMAGE` in `.env`. The GHCR package visibility can stay `private` — the deploy step authenticates with the workflow's `GITHUB_TOKEN`.
-
----
-
-## Notebook / library usage
-
-```python
-from codenames_ai import (
-    Config, StoragePaths,
-    VocabConfig, load_or_build_vocabulary,
-    FastTextProvider, load_or_build_embedding_matrix,
-    AISpymaster, AIGuesser,
-    generate_board, SpymasterView, GuesserView,
-)
-
-config = Config()
-storage = StoragePaths.from_config(config)
-
-# Build (or load cached) vocabularies
-game_vocab_cfg = VocabConfig(language="en", zipf_min=4.0, zipf_max=6.5,
-                              allowed_pos=frozenset({"NOUN"}))
-game_vocab = load_or_build_vocabulary(game_vocab_cfg, storage)
-
-clue_vocab_cfg = VocabConfig(language="en", zipf_min=3.0, zipf_max=7.0,
-                              allowed_pos=frozenset({"NOUN", "ADJ"}))
-clue_vocab = load_or_build_vocabulary(clue_vocab_cfg, storage)
-
-# Load (or build cached) embedding matrix
-provider = FastTextProvider(storage.models_dir / "cc.en.300.bin")
-matrix = load_or_build_embedding_matrix(clue_vocab, provider, storage)
-
-# Create agents
-spymaster = AISpymaster(matrix, clue_vocab, risk=0.5)
-guesser   = AIGuesser(matrix, risk=0.5)
-
-# Generate a board and run one turn
-board = generate_board(game_vocab, seed=42)
-spy_trace = spymaster.give_clue(SpymasterView(board=board, team=board.first_team))
-
-print(spy_trace.chosen.clue, spy_trace.chosen.n, spy_trace.chosen.targets)
-# Inspect full trace
-for c in spy_trace.top_candidates[:5]:
-    print(f"  {c.clue:20s}  N={c.n}  score={c.score:.3f}  margin={c.margin:.3f}")
-```
-
-### LLM reranking (optional)
-
-```python
-from codenames_ai import LLMCache, OpenAICompatibleProvider
-from codenames_ai.agent.rerank import SpymasterReranker, GuesserReranker
-
-cache = LLMCache(storage.llm_cache_path)
-llm = OpenAICompatibleProvider(
-    model="gpt-4o-mini",
-    base_url="https://api.openai.com/v1",
-    api_key="sk-...",
-    cache=cache,
-)
-
-spymaster = AISpymaster(
-    matrix, clue_vocab, risk=0.5,
-    reranker=SpymasterReranker(llm, top_k=200, blend_alpha=0.5),
-)
-```
-
-### Human-in-the-loop play
-
-```python
-from codenames_ai import Game, HumanSpymaster, trivial_spymaster_trace
-
-human_spy = HumanSpymaster()
-game = Game(board,
-            red_spymaster=human_spy,
-            red_guesser=guesser,
-            blue_spymaster=spymaster,
-            blue_guesser=guesser)
-
-# Before the game reaches the human spymaster phase, supply the clue:
-human_spy.prepare(trivial_spymaster_trace("ocean", targets=(), n=2))
-game.step()  # processes the human clue, then AI guesses
-```
-
-### Eval harness in a notebook
-
-```python
-from codenames_ai import run_tournament, aggregate, compare, save_records
-from codenames_ai import iter_golden_cases, evaluate_golden, golden_pass_rate
-
-# Self-play tournament
-records = run_tournament(
-    seeds=range(50),
-    game_vocab=game_vocab,
-    red_spymaster=spymaster, red_guesser=guesser,
-    blue_spymaster=spymaster, blue_guesser=guesser,
-    label="risk=0.5",
-)
-print(aggregate(records))
-
-# Golden board regression
-results = [evaluate_golden(spy, g) for g, spy in iter_golden_cases()]
-print(golden_pass_rate(results))
-```
 
 ---
 

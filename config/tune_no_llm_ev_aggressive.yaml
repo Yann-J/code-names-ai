@@ -1,52 +1,30 @@
-# No-LLM eval config: stronger EV + higher multi-target ambition.
+# Embedding / MC-only eval: higher risk, more rollouts.
+extends: default.yaml
+
 label: no_llm_ev_aggressive
-risk: 0.80
-language: en
 
-llm_rerank: false
+risk:
+  base_risk: 0.80
 
-game_zipf:
-  min: 4.0
-  max: 6.5
-clue_zipf:
-  min: 3.0
-  max: 7.0
-
-embedding_top_k: 20
-top_k_trace: 200
-blend_alpha: 0.45
-
-clue_allowed_pos:
-  - NOUN
-  - ADJ
-  - VERB
-
-game_allowed_pos:
-  - NOUN
-
-exclusions_path: data/exclusions/en.txt
-guesser_extra_candidates: 3
+vocabulary:
+  exclusions_path: ../data/exclusions/en
 
 scoring:
-  prefer_min_targets: 4
-  expected_reward_weight: 1.50
+  llm_rerank: false
+  blend_alpha: 0.45
   mc_trials: 160
-
-  # Explicit overrides (optional; set to strengthen multi-target behavior)
-  ambition_weight: 0.30
-  margin_weight: 0.12
-  undercluster_penalty_weight: 0.05
-
+  mc_temperature: null
+  mc_rank_bias: null
+  margin_floor: null
+  assassin_ceiling: null
+  reward_friendly: null
+  reward_neutral: null
+  reward_opponent: null
+  reward_assassin: null
   adaptive_mc_base_trials: 120
   adaptive_mc_extra_trials: 220
   adaptive_mc_ev_band: 0.14
-
-  # Keep N=2 as the peak, but push a bit more mass to N>=3.
-  lane_target_fractions: [0.10, 0.40, 0.26, 0.12, 0.08, 0.03, 0.01]
-  lane_quality_delta_ev: 0.25
   lane_max_n: 7
 
-  # Unused with llm_rerank=false, but kept for completeness
-  ev_llm_gain: 0.40
-  ev_llm_temperature: 0.20
-
+guesser:
+  extra_candidates: 3

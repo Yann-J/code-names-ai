@@ -3,7 +3,48 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class RiskConfig(BaseModel):
+    """Knobs that tune how aggressively the AI plays (weights, stopping, vetoes)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_risk: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Maps to spymaster scoring vetoes / MC softmax and guesser stop policy.",
+    )
+
+
+class DynamicRiskConfig(BaseModel):
+    """Optional board-aware adjustment of ``base_risk`` and selected veto/stop scalars."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    s: float = Field(
+        default=0.12,
+        ge=0.0,
+        le=2.0,
+        description="Strength of Δ on effective_risk via exp(−s·Δ).",
+    )
+    min_risk: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_risk: float = Field(default=1.0, ge=0.0, le=1.0)
+    beta_margin_floor: float = Field(default=0.25, ge=0.0, le=3.0)
+    beta_assassin_ceiling: float = Field(default=0.25, ge=0.0, le=3.0)
+    beta_confidence_floor: float = Field(default=0.25, ge=0.0, le=3.0)
+    beta_bonus_gap: float = Field(default=0.25, ge=0.0, le=3.0)
+
+    @model_validator(mode="after")
+    def _min_le_max(self) -> "DynamicRiskConfig":
+        if float(self.min_risk) > float(self.max_risk):
+            raise ValueError("dynamic_risk.min_risk must be <= max_risk")
+        return self
 
 
 class ZipfWindow(BaseModel):
@@ -36,6 +77,13 @@ class VocabularyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: str = "en"
+    exclusions_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional text file of words to exclude from vocab building (one per line). "
+            "Relative paths resolve against the directory of the YAML file passed to the CLI."
+        ),
+    )
     game: GameVocabularySideConfig = Field(default_factory=GameVocabularySideConfig)
     clue: ClueVocabularySideConfig = Field(default_factory=ClueVocabularySideConfig)
 
@@ -59,35 +107,30 @@ class GuesserConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    """Scoring and EV/rerank tuning knobs for the spymaster."""
+    """Monte Carlo EV scoring, hard vetoes, and LLM rerank blend."""
 
     model_config = ConfigDict(extra="forbid")
 
     llm_rerank: bool = True
-    blend_alpha: float = Field(default=0.5, ge=0.0, le=1.0)
-
-    prefer_min_targets: int = Field(
-        default=3,
-        ge=1,
-        le=9,
-        description="Soft min targets per clue (capped by friendlies on board).",
-    )
-    expected_reward_weight: float = Field(
-        default=1.10,
+    blend_alpha: float = Field(
+        default=0.5,
         ge=0.0,
-        le=5.0,
-        description="Weight of Monte Carlo expected reward in spymaster scoring.",
+        le=1.0,
+        description="Final spymaster score: alpha*EV + (1-alpha)*(LLM_confidence*N_eff).",
     )
-    ambition_weight: float | None = Field(default=None, ge=0.0, le=2.0)
-    margin_weight: float | None = Field(default=None, ge=0.0, le=2.0)
-    freq_weight: float | None = Field(default=None, ge=0.0, le=2.0)
-    assassin_weight: float | None = Field(default=None, ge=0.0, le=5.0)
-    opponent_weight: float | None = Field(default=None, ge=0.0, le=5.0)
-    undercluster_penalty_weight: float | None = Field(default=None, ge=0.0, le=2.0)
+
     margin_floor: float | None = Field(default=None, ge=-1.0, le=1.0)
     assassin_ceiling: float | None = Field(default=None, ge=-1.0, le=1.0)
     mc_temperature: float | None = Field(default=None, ge=0.01, le=5.0)
-    mc_rank_bias: float | None = Field(default=None, ge=0.0, le=10.0)
+    mc_rank_bias: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=10.0,
+        description=(
+            "MC softmax: penalize logits by bias*log1p(rank-by-sim). "
+            "0 = cosine-only stochastic; higher = greedier stochastic."
+        ),
+    )
     reward_friendly: float | None = Field(default=None, ge=-10.0, le=10.0)
     reward_neutral: float | None = Field(default=None, ge=-10.0, le=10.0)
     reward_opponent: float | None = Field(default=None, ge=-10.0, le=10.0)
@@ -102,15 +145,21 @@ class ScoringConfig(BaseModel):
     adaptive_mc_extra_trials: int = Field(default=96, ge=0, le=5000)
     adaptive_mc_ev_band: float = Field(default=0.10, ge=0.0, le=5.0)
 
-    lane_target_fractions: list[float] = Field(
-        default_factory=lambda: [0.18, 0.42, 0.22, 0.10, 0.05, 0.02, 0.01],
-        description="Target fractions for N=1..7 shortlist lanes.",
+    lane_max_n: int = Field(
+        default=7,
+        ge=1,
+        le=9,
+        description="Max target count ``N`` to evaluate per clue (prefix length cap).",
     )
-    lane_quality_delta_ev: float = Field(default=0.20, ge=0.0, le=5.0)
-    lane_max_n: int = Field(default=7, ge=2, le=9)
-
-    ev_llm_gain: float = Field(default=0.35, ge=0.0, le=2.0)
-    ev_llm_temperature: float = Field(default=0.20, gt=0.0, le=5.0)
+    embedding_top_k: int = Field(
+        default=20,
+        ge=1,
+        le=10_000,
+        description=(
+            "After embedding / EV scoring: how many top candidates are sent to the "
+            "spymaster LLM reranker when ``llm_rerank`` is enabled."
+        ),
+    )
 
 
 class EvalAgentConfigFile(BaseModel):
@@ -119,9 +168,9 @@ class EvalAgentConfigFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str = "default"
-    risk: float = Field(default=0.5, ge=0.0, le=1.0)
+    risk: RiskConfig = Field(default_factory=RiskConfig)
+    dynamic_risk: DynamicRiskConfig = Field(default_factory=DynamicRiskConfig)
     vocabulary: VocabularyConfig = Field(default_factory=VocabularyConfig)
-    exclusions_path: Path | None = None
 
     top_k_trace: int = Field(
         default=200,
@@ -129,33 +178,88 @@ class EvalAgentConfigFile(BaseModel):
         le=10_000,
         description="Max candidates kept in SpymasterTrace after rerank.",
     )
-    embedding_top_k: int = Field(
-        default=20,
-        ge=1,
-        le=10_000,
-        description="Top embedding-scored candidates sent to the spymaster LLM.",
-    )
     guesser: GuesserConfig = Field(default_factory=GuesserConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
 
-    @model_validator(mode="after")
-    def _validate_lane_fractions(self) -> "EvalAgentConfigFile":
-        if len(self.scoring.lane_target_fractions) != 7:
-            raise ValueError("lane_target_fractions must provide exactly 7 values (N=1..7)")
-        if sum(self.scoring.lane_target_fractions) <= 0.0:
-            raise ValueError("lane_target_fractions must sum to a positive value")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_flat_risk(cls, data: Any) -> Any:
+        """Accept legacy top-level ``risk: 0.5`` as ``risk: {base_risk: 0.5}``."""
+        if not isinstance(data, dict):
+            return data
+        r = data.get("risk")
+        if isinstance(r, (int, float)):
+            merged = {k: v for k, v in data.items() if k != "risk"}
+            merged["risk"] = {"base_risk": float(r)}
+            return merged
+        return data
+
+
+def _deep_merge_mapping(base: dict, override: dict) -> dict:
+    """Recursively merge mappings; ``override`` wins. Lists and scalars replace."""
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge_mapping(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _extends_to_paths(raw: object, *, relative_to: Path) -> list[Path]:
+    if isinstance(raw, str):
+        seq = [raw]
+    elif isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+        seq = list(raw)
+    else:
+        raise ValueError("extends must be a string or a list of strings")
+    resolved: list[Path] = []
+    for item in seq:
+        p = Path(item)
+        resolved.append(p.resolve() if p.is_absolute() else (relative_to.parent / p).resolve())
+    return resolved
+
+
+def load_eval_yaml_merged(path: Path, *, _chain: frozenset[Path] | None = None) -> dict:
+    """Load YAML, applying ``extends`` (inherit) depth-first; child overrides parent."""
+    path = path.resolve()
+    chain = _chain or frozenset()
+    if path in chain:
+        msg = " -> ".join(str(p) for p in (*chain, path))
+        raise ValueError(f"cyclic config extends: {msg}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"config root must be a mapping: {path}")
+    inherited = data.pop("extends", None)
+    merged: dict = {}
+    if inherited is not None:
+        for parent in _extends_to_paths(inherited, relative_to=path):
+            merged = _deep_merge_mapping(merged, load_eval_yaml_merged(parent, _chain=chain | {path}))
+    return _deep_merge_mapping(merged, data)
 
 
 def load_eval_yaml(path: Path) -> tuple[EvalAgentConfigFile, str]:
-    """Load and validate a YAML file; return `(config, config_hash_hex16)`."""
-    import hashlib
+    """Load and validate a YAML file; return `(config, config_hash_hex16)`.
 
-    raw_bytes = path.read_bytes()
-    digest = hashlib.sha256(raw_bytes).hexdigest()[:16]
-    data = yaml.safe_load(raw_bytes.decode("utf-8")) or {}
+    If the file defines ``extends``, parent file(s) are merged first (each path is
+    relative to the file that references it). Later keys override earlier ones; the
+    loaded file wins over all parents. The digest covers the merged configuration.
+    """
+    import hashlib
+    import json
+
+    path = path.resolve()
+    data = load_eval_yaml_merged(path)
+    digest = hashlib.sha256(
+        json.dumps(data, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:16]
     cfg = EvalAgentConfigFile.model_validate(data)
-    if cfg.exclusions_path is not None and not cfg.exclusions_path.is_absolute():
-        rel = path.parent / cfg.exclusions_path
-        cfg = cfg.model_copy(update={"exclusions_path": rel})
+    vocab = cfg.vocabulary
+    if vocab.exclusions_path is not None and not vocab.exclusions_path.is_absolute():
+        rel = path.parent / vocab.exclusions_path
+        cfg = cfg.model_copy(
+            update={
+                "vocabulary": vocab.model_copy(update={"exclusions_path": rel.resolve()})
+            }
+        )
     return cfg, digest

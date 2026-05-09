@@ -27,16 +27,7 @@ from codenames_ai.game.state import TurnPhase
 
 
 def _candidate(clue: str, n: int) -> Candidate:
-    components = ScoreComponents(
-        friendly_min_sim=1.0,
-        ambition_bonus=0.0,
-        margin_bonus=0.0,
-        freq_bonus=0.0,
-        assassin_penalty=0.0,
-        opponent_penalty=0.0,
-        expected_reward_bonus=0.0,
-        expected_reward_raw=0.0,
-    )
+    components = ScoreComponents(expected_reward_raw=0.0, friendly_min_sim=1.0)
     return Candidate(
         clue=clue,
         targets=tuple(),

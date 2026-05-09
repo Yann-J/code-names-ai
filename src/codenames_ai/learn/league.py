@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,13 +23,12 @@ from codenames_ai.game.models import Color
 from codenames_ai.game.orchestrator import Game
 
 PARAM_SPECS: dict[str, tuple[float, float]] = {
-    "ambition_weight": (0.0, 2.0),
-    "margin_weight": (0.0, 2.0),
-    "assassin_weight": (0.0, 5.0),
-    "opponent_weight": (0.0, 5.0),
-    "undercluster_penalty_weight": (0.0, 2.0),
-    "expected_reward_weight": (0.0, 5.0),
     "mc_temperature": (0.01, 5.0),
+    "mc_rank_bias": (0.0, 10.0),
+    "reward_friendly": (0.2, 2.5),
+    "reward_neutral": (-1.5, -0.05),
+    "reward_opponent": (-2.5, -0.1),
+    "reward_assassin": (-8.0, -0.5),
 }
 
 FITNESS_EPS = 1e-12
@@ -134,11 +133,11 @@ def _git_commit_hash() -> str | None:
 
 
 def _policy_from_eval_cfg(eval_cfg: EvalAgentConfigFile) -> dict[str, float]:
-    base = ScoringWeights.from_risk(eval_cfg.risk)
+    base = ScoringWeights.from_risk(eval_cfg.risk.base_risk)
     out: dict[str, float] = {}
     for name in PARAM_SPECS:
-        value = getattr(eval_cfg.scoring, name)
-        out[name] = float(value if value is not None else getattr(base, name))
+        yaml_val = getattr(eval_cfg.scoring, name)
+        out[name] = float(yaml_val if yaml_val is not None else getattr(base, name))
     return out
 
 
@@ -267,19 +266,20 @@ def load_latest_checkpoint(run_dir: Path) -> dict[str, Any]:
 
 
 def _build_scoring_weights_for_policy(eval_cfg: EvalAgentConfigFile, params: dict[str, float]) -> ScoringWeights:
-    base = ScoringWeights.from_risk(eval_cfg.risk)
+    base = ScoringWeights.from_risk(eval_cfg.risk.base_risk)
     updates: dict[str, Any] = {
-        "prefer_min_targets": eval_cfg.scoring.prefer_min_targets,
         "mc_trials": eval_cfg.scoring.mc_trials,
         "adaptive_mc_base_trials": eval_cfg.scoring.adaptive_mc_base_trials,
         "adaptive_mc_extra_trials": eval_cfg.scoring.adaptive_mc_extra_trials,
         "adaptive_mc_ev_band": eval_cfg.scoring.adaptive_mc_ev_band,
-        "lane_target_fractions": tuple(eval_cfg.scoring.lane_target_fractions),
-        "lane_quality_delta_ev": eval_cfg.scoring.lane_quality_delta_ev,
         "lane_max_n": eval_cfg.scoring.lane_max_n,
     }
+    if eval_cfg.scoring.margin_floor is not None:
+        updates["margin_floor"] = eval_cfg.scoring.margin_floor
+    if eval_cfg.scoring.assassin_ceiling is not None:
+        updates["assassin_ceiling"] = eval_cfg.scoring.assassin_ceiling
     updates.update(params)
-    return ScoringWeights(**{**base.__dict__, **updates})
+    return replace(base, **updates)
 
 
 def _init_worker(cfg_data: dict[str, Any]) -> None:
@@ -300,7 +300,7 @@ def _run_one_game(task: dict[str, Any]) -> dict[str, Any]:
     spy_red = AISpymaster(
         _WORKER_RUNTIME.matrix,
         _WORKER_RUNTIME.clue_vocab,
-        risk=_WORKER_CFG.risk,
+        risk=_WORKER_CFG.risk.base_risk,
         top_k=_WORKER_CFG.top_k_trace,
         reranker=None,
         weights=_build_scoring_weights_for_policy(_WORKER_CFG, red_params),
@@ -308,14 +308,14 @@ def _run_one_game(task: dict[str, Any]) -> dict[str, Any]:
     spy_blue = AISpymaster(
         _WORKER_RUNTIME.matrix,
         _WORKER_RUNTIME.clue_vocab,
-        risk=_WORKER_CFG.risk,
+        risk=_WORKER_CFG.risk.base_risk,
         top_k=_WORKER_CFG.top_k_trace,
         reranker=None,
         weights=_build_scoring_weights_for_policy(_WORKER_CFG, blue_params),
     )
     guesser_red = AIGuesser(
         _WORKER_RUNTIME.matrix,
-        risk=_WORKER_CFG.risk,
+        risk=_WORKER_CFG.risk.base_risk,
         reranker=None,
         sampling_temperature=_WORKER_CFG.guesser.sampling_temperature,
         sampling_top_k=_WORKER_CFG.guesser.sampling_top_k,
@@ -323,7 +323,7 @@ def _run_one_game(task: dict[str, Any]) -> dict[str, Any]:
     )
     guesser_blue = AIGuesser(
         _WORKER_RUNTIME.matrix,
-        risk=_WORKER_CFG.risk,
+        risk=_WORKER_CFG.risk.base_risk,
         reranker=None,
         sampling_temperature=_WORKER_CFG.guesser.sampling_temperature,
         sampling_top_k=_WORKER_CFG.guesser.sampling_top_k,

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import secrets
+from dataclasses import replace
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from codenames_ai.agent.interfaces import NoLegalClueError
+from codenames_ai.agent.risk_context import risk_snapshot_for_board
 from codenames_ai.agent.scoring import ScoringWeights
 from codenames_ai.agent.trace import SpymasterTrace
 from codenames_ai.cli.runtime import EvalRuntime
@@ -180,16 +182,40 @@ def api_end_guess_turn(
 
 @api_router.post("/analysis", response_model=AnalysisResponse)
 def api_analysis(body: AnalysisRequestBody, get_runtime: RuntimeDep) -> AnalysisResponse:
+    def _baseline_spy_weights() -> ScoringWeights:
+        spy = rt.spymaster
+        bw = getattr(spy, "baseline_weights", None)
+        if isinstance(bw, ScoringWeights):
+            return bw
+        return getattr(spy, "weights")
+
     def _compute_trace(team: Color) -> SpymasterTrace:
+        view = SpymasterView(board=board, team=team)
         try:
-            return rt.spymaster.give_clue(SpymasterView(board=board, team=team))
+            trace = rt.spymaster.give_clue(view)
+            if trace.risk_snapshot is None:
+                rs = risk_snapshot_for_board(
+                    board,
+                    team,
+                    base_risk=float(body.risk),
+                    policy=rt.dynamic_risk_policy,
+                )
+                trace = replace(trace, risk_snapshot=rs)
+            return trace
         except NoLegalClueError:
+            snap = risk_snapshot_for_board(
+                board,
+                team,
+                base_risk=float(body.risk),
+                policy=rt.dynamic_risk_policy,
+            )
             return SpymasterTrace(
                 chosen=None,
                 top_candidates=(),
-                weights=ScoringWeights.from_risk(body.risk),
+                weights=_baseline_spy_weights(),
                 veto_count=0,
                 illegal_count=0,
+                risk_snapshot=snap,
             )
 
     rt = get_runtime(body.risk)

@@ -7,32 +7,30 @@ from codenames_ai.game.models import Clue
 
 
 @dataclass(frozen=True)
-class ScoreComponents:
-    """Per-component breakdown of a candidate's score, for inspection and tuning."""
+class RiskSnapshot:
+    """Optional telemetry for one AI decision — omitted when unavailable (older traces / humans)."""
 
-    friendly_min_sim: float
-    ambition_bonus: float
-    margin_bonus: float
-    freq_bonus: float
-    assassin_penalty: float
-    opponent_penalty: float
-    expected_reward_bonus: float
+    base_risk: float
+    effective_risk: float
+    delta_objectives: float
+    ours_unrevealed: int
+    theirs_unrevealed: int
+    dynamic_enabled: bool
+
+
+@dataclass(frozen=True)
+class ScoreComponents:
+    """Breakdown for inspection; embedding score equals ``expected_reward_raw``."""
+
     expected_reward_raw: float
-    undercluster_penalty: float = 0.0
-    """Soft penalty when N is below the preferred cluster size (see ``ScoringWeights``)."""
+    """Monte Carlo estimate of expected turn reward for this clue and ``N``."""
+
+    friendly_min_sim: float = 0.0
+    """Lowest cosine similarity among the ``N`` included friendly targets (diagnostic)."""
 
     @property
     def total(self) -> float:
-        return (
-            self.friendly_min_sim
-            + self.ambition_bonus
-            + self.margin_bonus
-            + self.freq_bonus
-            + self.expected_reward_bonus
-            - self.assassin_penalty
-            - self.opponent_penalty
-            - self.undercluster_penalty
-        )
+        return float(self.expected_reward_raw)
 
 
 @dataclass(frozen=True)
@@ -41,9 +39,8 @@ class Candidate:
 
     `score` is the **final** ranking score (used for sort order). When no LLM
     reranking is applied, `score == embedding_score == components.total`. When
-    reranked, `score` is the blended `α · normalized_embedding + (1-α) · llm_score`
-    and the original `embedding_score` and `llm_score` are preserved alongside
-    so the trace can surface both.
+    reranked, `score` blends EV with an LLM value proxy; `embedding_score` stays
+    the pre-rerank EV.
     """
 
     clue: str
@@ -73,6 +70,7 @@ class SpymasterTrace:
     veto_count: int
     illegal_count: int
     relaxation_steps: int = 0
+    risk_snapshot: RiskSnapshot | None = None
 
     @property
     def clue(self) -> Clue:
@@ -110,3 +108,4 @@ class GuesserTrace:
     stop_policy: StopPolicy
     bonus_attempted: bool
     stop_reason: str  # 'reached_n' | 'reached_n_plus_bonus' | 'confidence_floor' | 'no_more_candidates' | 'pass_clue'
+    risk_snapshot: RiskSnapshot | None = None

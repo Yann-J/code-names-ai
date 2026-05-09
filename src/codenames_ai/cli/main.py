@@ -18,8 +18,54 @@ from codenames_ai.learn import LeagueConfig, run_league_learning
 from codenames_ai.storage import StoragePaths
 
 
+def parse_log_level(value: str) -> int | None:
+    """Return a logging level constant, or None if *value* is empty or invalid."""
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if stripped.isdigit():
+        return int(stripped)
+    resolved = logging.getLevelName(stripped.upper())
+    if isinstance(resolved, int):
+        return resolved
+    return None
+
+
+def resolve_log_level(*, verbose: bool) -> int:
+    """CLI log level: ``LOG_LEVEL`` env, overridden to DEBUG when *verbose* is true."""
+    raw = os.environ.get("LOG_LEVEL", "")
+    base = logging.INFO
+    trimmed = raw.strip()
+    if trimmed:
+        parsed = parse_log_level(trimmed)
+        if parsed is not None:
+            base = parsed
+        else:
+            print(
+                "codenames-ai: ignoring invalid LOG_LEVEL="
+                f"{trimmed!r} (expected e.g. DEBUG, INFO, WARNING)",
+                file=sys.stderr,
+            )
+    if verbose:
+        return min(base, logging.DEBUG)
+    return base
+
+
+def _uvicorn_log_level(py_level: int) -> str:
+    """Map stdlib numeric level to uvicorn ``log_level`` string."""
+    if py_level <= logging.DEBUG:
+        return "debug"
+    if py_level <= logging.INFO:
+        return "info"
+    if py_level <= logging.WARNING:
+        return "warning"
+    if py_level <= logging.ERROR:
+        return "error"
+    return "critical"
+
+
 def _setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
+    level = resolve_log_level(verbose=verbose)
     logging.basicConfig(
         level=level,
         format="%(levelname)s %(name)s %(message)s",
@@ -143,7 +189,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         app,
         host=args.host,
         port=args.port,
-        log_level="debug" if args.verbose else "info",
+        log_level=_uvicorn_log_level(resolve_log_level(verbose=args.verbose)),
     )
     return 0
 

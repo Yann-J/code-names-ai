@@ -7,4 +7,4 @@ def test_index_ok():
     client = TestClient(create_app())
     r = client.get("/")
     assert r.status_code == 200
-    assert "Code Names AI" in r.text
+    assert "Word Guess AI" in r.text

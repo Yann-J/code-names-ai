@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from dataclasses import dataclass, field, replace
-from typing import Iterable
 
 from codenames_ai.agent.trace import Candidate, CandidateGuess
 from codenames_ai.game.models import Clue, GuesserView, SpymasterView
@@ -25,6 +23,22 @@ class RerankItem:
     reason: str
     clue: str = ""
     targets: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _normalize_minmax(values: list[float]) -> list[float]:
+    vs = list(values)
+    if not vs:
+        return []
+    lo = min(vs)
+    hi = max(vs)
+    if hi == lo:
+        return [0.5] * len(vs)
+    return [(v - lo) / (hi - lo) for v in vs]
+
+
+def _friendlies_remaining(view: SpymasterView) -> int:
+    """Unrevealed cards for the spymaster's team on the active board."""
+    return sum(1 for c in view.board.active() if c.color == view.team)
 
 
 _SPYMASTER_SYSTEM = (
@@ -55,17 +69,6 @@ _GUESSER_SYSTEM = (
     "Respond with strict JSON of shape:\n"
     '{"scores": [{"index": <int 1-based>, "score": <float 0..1>, "reason": "<short>"}, ...]}'
 )
-
-
-def _normalize_minmax(values: Iterable[float]) -> list[float]:
-    vs = list(values)
-    if not vs:
-        return []
-    lo = min(vs)
-    hi = max(vs)
-    if hi == lo:
-        return [0.5] * len(vs)
-    return [(v - lo) / (hi - lo) for v in vs]
 
 
 def _parse_response(text: str, expected_count: int) -> dict[int, RerankItem]:
@@ -120,8 +123,8 @@ class SpymasterReranker:
 
     The LLM sees the full board (with team colors) and the shortlist as
     `(clue, intended_targets, N)` tuples — but **not** the embedding scores.
-    Returns the same candidates with `score = α · normalized_embedding + (1-α) · llm_score`,
-    plus `llm_score` and `llm_reason` populated.
+    Final score: ``α · EV + (1-α) · (llm × N_eff)`` with ``N_eff = min(N, friendlies_left)``.
+    Raw LLM confidence is stored in ``llm_score``.
     """
 
     def __init__(
@@ -130,16 +133,12 @@ class SpymasterReranker:
         *,
         top_k: int = 10,
         blend_alpha: float = 0.5,
-        ev_llm_gain: float = 0.35,
-        ev_llm_temperature: float = 0.20,
     ) -> None:
         if not 0.0 <= blend_alpha <= 1.0:
             raise ValueError(f"blend_alpha must be in [0, 1], got {blend_alpha}")
         self.llm = llm
         self.top_k = top_k
         self.blend_alpha = blend_alpha
-        self.ev_llm_gain = float(ev_llm_gain)
-        self.ev_llm_temperature = max(1e-6, float(ev_llm_temperature))
 
     def rerank(
         self, shortlist: list[Candidate], view: SpymasterView
@@ -148,6 +147,7 @@ class SpymasterReranker:
             return shortlist
         n = min(len(shortlist), self.top_k)
         head = shortlist[:n]
+        friendlies_left = _friendlies_remaining(view)
 
         messages = [
             ChatMessage(role="system", content=_SPYMASTER_SYSTEM),
@@ -164,9 +164,6 @@ class SpymasterReranker:
 
         parsed = _parse_response(response, expected_count=n)
 
-        normalized = _normalize_minmax(c.embedding_score for c in head)
-        ev_values = [c.components.expected_reward_raw for c in head]
-        ev_ref = _median(ev_values) if ev_values else 0.0
         out: list[Candidate] = []
         for i, cand in enumerate(head):
             item = parsed.get(i + 1)
@@ -180,27 +177,23 @@ class SpymasterReranker:
                     list(cand.targets),
                     cand.embedding_score,
                 )
-                # Fall back: keep embedding score, flag missing rerank.
                 out.append(cand)
                 continue
-            ev_factor = 1.0 + self.ev_llm_gain * math.tanh(
-                (cand.components.expected_reward_raw - ev_ref) / self.ev_llm_temperature
-            )
-            llm_adjusted = max(0.0, min(1.0, item.score * ev_factor))
-            blended = self.blend_alpha * normalized[i] + (1.0 - self.blend_alpha) * llm_adjusted
+            n_eff = min(int(cand.n), friendlies_left)
+            llm_value = float(item.score) * n_eff
+            ev = cand.components.expected_reward_raw
+            blended = self.blend_alpha * ev + (1.0 - self.blend_alpha) * llm_value
             logger.debug(
                 "spymaster rerank #%d: clue=%r n=%s targets=%s — "
-                "emb_raw=%.6f emb_norm=%.4f llm=%.4f llm_ev=%.4f ev=%.4f ev_ref=%.4f blend=%.4f (α=%.2f) | %s",
+                "ev=%.4f llm=%.4f n_eff=%d llm_value=%.4f blend=%.4f (α=%.2f) | %s",
                 i + 1,
                 cand.clue,
                 cand.n,
                 list(cand.targets),
-                cand.embedding_score,
-                normalized[i],
+                ev,
                 item.score,
-                llm_adjusted,
-                cand.components.expected_reward_raw,
-                ev_ref,
+                n_eff,
+                llm_value,
                 blended,
                 self.blend_alpha,
                 item.reason,
@@ -209,7 +202,7 @@ class SpymasterReranker:
                 replace(
                     cand,
                     score=blended,
-                    llm_score=llm_adjusted,
+                    llm_score=item.score,
                     llm_reason=item.reason,
                 )
             )
@@ -225,16 +218,6 @@ class SpymasterReranker:
         for i, c in enumerate(shortlist, start=1):
             lines.append(f'{i}. clue="{c.clue}" targets={list(c.targets)} N={c.n}')
         return "\n".join(lines)
-
-
-def _median(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    if len(ordered) % 2 == 1:
-        return ordered[mid]
-    return 0.5 * (ordered[mid - 1] + ordered[mid])
 
 
 class GuesserReranker:

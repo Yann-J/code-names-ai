@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 
-from codenames_ai.cli.eval_config import EvalAgentConfigFile, ScoringConfig
+from codenames_ai.cli.eval_config import EvalAgentConfigFile, RiskConfig, ScoringConfig
 from codenames_ai.cli.runtime import EvalRuntime, build_eval_runtime
 from codenames_ai.config import Config
 from codenames_ai.web.api_routes import api_router
@@ -27,9 +27,11 @@ def create_app(
     def cfg_at_risk(risk: float) -> EvalAgentConfigFile:
         if agent_config is None:
             return EvalAgentConfigFile(
-                label="web", scoring=ScoringConfig(llm_rerank=False), risk=risk
+                label="web",
+                scoring=ScoringConfig(llm_rerank=False),
+                risk=RiskConfig(base_risk=risk),
             )
-        return agent_config.model_copy(update={"risk": risk})
+        return agent_config.model_copy(update={"risk": RiskConfig(base_risk=risk)})
 
     @lru_cache(maxsize=32)
     def _get_runtime(risk: float) -> EvalRuntime:
@@ -55,9 +57,17 @@ def create_app(
                 return None
             return p if p.is_file() else None
 
+        def _spa_index() -> FileResponse:
+            # Avoid the browser holding a stale index.html while hashes in the
+            # built bundle change after `npm run build` in web-ui.
+            return FileResponse(
+                STATIC_PWA_DIR / "index.html",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
+
         @app.get("/app")
         def pwa_index_no_slash():
-            return FileResponse(STATIC_PWA_DIR / "index.html")
+            return _spa_index()
 
         @app.get("/")
         def root_index():
@@ -65,13 +75,13 @@ def create_app(
 
         @app.get("/app/")
         def pwa_index():
-            return FileResponse(STATIC_PWA_DIR / "index.html")
+            return _spa_index()
 
         @app.get("/app/{full_path:path}")
         def pwa_shell_or_asset(full_path: str):
             hit = _pwa_file_or_none(full_path)
             if hit is not None:
                 return FileResponse(hit)
-            return FileResponse(STATIC_PWA_DIR / "index.html")
+            return _spa_index()
 
     return app

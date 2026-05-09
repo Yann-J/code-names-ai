@@ -73,21 +73,20 @@ class AIGuesser(Guesser):
             for rank, i in enumerate(order)
         ]
 
-        if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "guesser embedding ranking: clue=%r count=%s (%d unrevealed cards), "
+            "cosine sim descending:",
+            clue.word,
+            clue.count,
+            len(active),
+        )
+        for cand in ranked:
             logger.debug(
-                "guesser embedding ranking: clue=%r count=%s (%d unrevealed cards), "
-                "cosine sim descending:",
-                clue.word,
-                clue.count,
-                len(active),
+                "  emb rank %d %r cosine=%.6f",
+                cand.rank,
+                cand.word,
+                cand.similarity,
             )
-            for cand in ranked:
-                logger.debug(
-                    "  emb rank %d %r cosine=%.6f",
-                    cand.rank,
-                    cand.word,
-                    cand.similarity,
-                )
 
         if self.reranker is not None:
             ranked = list(self.reranker.rerank(ranked, view, clue))
@@ -106,28 +105,23 @@ class AIGuesser(Guesser):
                 )
                 for new_rank, c in enumerate(ranked)
             ]
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "guesser ranking after rerank: %d cards by blended score:",
-                    len(ranked),
+            logger.info(
+                "guesser ranking after rerank: %d cards by blended score:",
+                len(ranked),
+            )
+            for cand in ranked:
+                llm = f"{cand.llm_score:.4f}" if cand.llm_score is not None else "—"
+                reason = (cand.llm_reason or "").strip()
+                tail = f" | {reason}" if reason else ""
+                logger.info(
+                    "  rank %d %r blend=%.6f cosine=%.6f llm=%s%s",
+                    cand.rank,
+                    cand.word,
+                    cand.score,
+                    cand.similarity,
+                    llm,
+                    tail,
                 )
-                for cand in ranked:
-                    llm = (
-                        f"{cand.llm_score:.4f}"
-                        if cand.llm_score is not None
-                        else "—"
-                    )
-                    reason = (cand.llm_reason or "").strip()
-                    tail = f" | {reason}" if reason else ""
-                    logger.debug(
-                        "  rank %d %r blend=%.6f cosine=%.6f llm=%s%s",
-                        cand.rank,
-                        cand.word,
-                        cand.score,
-                        cand.similarity,
-                        llm,
-                        tail,
-                    )
 
         guesses, bonus_attempted, stop_reason = self._apply_stop_policy(
             ranked, clue.count
@@ -150,9 +144,7 @@ class AIGuesser(Guesser):
             )
         missing = [c.word for c in active if c.word not in self.matrix]
         if missing:
-            raise ValueError(
-                f"unrevealed board words missing from matrix: {missing}"
-            )
+            raise ValueError(f"unrevealed board words missing from matrix: {missing}")
 
     def _sims_for(self, cards: list[Card], clue_vec: np.ndarray) -> np.ndarray:
         if not cards:

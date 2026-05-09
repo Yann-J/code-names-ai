@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from codenames_ai.agent.guesser import AIGuesser
+from codenames_ai.agent.interfaces import Guesser, Spymaster
 from codenames_ai.agent.rerank import GuesserReranker, SpymasterReranker
+from codenames_ai.agent.risk_context import (
+    DynamicRiskAIGuesser,
+    DynamicRiskAISpymaster,
+    DynamicRiskPolicy,
+)
 from codenames_ai.agent.scoring import ScoringWeights
 from codenames_ai.agent.spymaster import AISpymaster
 from codenames_ai.cli.eval_config import EvalAgentConfigFile
@@ -24,8 +30,9 @@ class EvalRuntime:
     game_vocab: Vocabulary
     clue_vocab: Vocabulary
     matrix: EmbeddingMatrix
-    spymaster: AISpymaster
-    guesser: AIGuesser
+    spymaster: Spymaster
+    guesser: Guesser
+    dynamic_risk_policy: DynamicRiskPolicy
 
 
 def _vocab_config(
@@ -38,14 +45,28 @@ def _vocab_config(
             zipf_min=vocab.game.zipf.min,
             zipf_max=vocab.game.zipf.max,
             allowed_pos=frozenset(vocab.game.allowed_pos),
-            exclusions_path=game.exclusions_path,
+            exclusions_path=vocab.exclusions_path,
         )
     return VocabConfig(
         language=vocab.language,
         zipf_min=vocab.clue.zipf.min,
         zipf_max=vocab.clue.zipf.max,
         allowed_pos=frozenset(vocab.clue.allowed_pos),
-        exclusions_path=game.exclusions_path,
+        exclusions_path=vocab.exclusions_path,
+    )
+
+
+def _dynamic_risk_policy(cfg: EvalAgentConfigFile) -> DynamicRiskPolicy:
+    d = cfg.dynamic_risk
+    return DynamicRiskPolicy(
+        enabled=bool(d.enabled),
+        s=float(d.s),
+        min_risk=float(d.min_risk),
+        max_risk=float(d.max_risk),
+        beta_margin_floor=float(d.beta_margin_floor),
+        beta_assassin_ceiling=float(d.beta_assassin_ceiling),
+        beta_confidence_floor=float(d.beta_confidence_floor),
+        beta_bonus_gap=float(d.beta_bonus_gap),
     )
 
 
@@ -91,10 +112,8 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         )
         spy_reranker = SpymasterReranker(
             llm,
-            top_k=cfg.embedding_top_k,
+            top_k=scoring.embedding_top_k,
             blend_alpha=scoring.blend_alpha,
-            ev_llm_gain=scoring.ev_llm_gain,
-            ev_llm_temperature=scoring.ev_llm_temperature,
         )
         guess_reranker = GuesserReranker(
             llm,
@@ -102,25 +121,15 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
             blend_alpha=scoring.blend_alpha,
         )
 
-    base = ScoringWeights.from_risk(cfg.risk)
+    base = ScoringWeights.from_risk(cfg.risk.base_risk)
     updates: dict[str, object] = {
-        "prefer_min_targets": scoring.prefer_min_targets,
-        "expected_reward_weight": scoring.expected_reward_weight,
         "mc_trials": scoring.mc_trials,
         "adaptive_mc_base_trials": scoring.adaptive_mc_base_trials,
         "adaptive_mc_extra_trials": scoring.adaptive_mc_extra_trials,
         "adaptive_mc_ev_band": scoring.adaptive_mc_ev_band,
-        "lane_target_fractions": tuple(scoring.lane_target_fractions),
-        "lane_quality_delta_ev": scoring.lane_quality_delta_ev,
         "lane_max_n": scoring.lane_max_n,
     }
     optional_overrides = {
-        "ambition_weight": scoring.ambition_weight,
-        "margin_weight": scoring.margin_weight,
-        "freq_weight": scoring.freq_weight,
-        "assassin_weight": scoring.assassin_weight,
-        "opponent_weight": scoring.opponent_weight,
-        "undercluster_penalty_weight": scoring.undercluster_penalty_weight,
         "margin_floor": scoring.margin_floor,
         "assassin_ceiling": scoring.assassin_ceiling,
         "mc_temperature": scoring.mc_temperature,
@@ -134,25 +143,37 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         if value is not None:
             updates[key] = value
     spy_weights = replace(base, **updates)
-    spymaster = AISpymaster(
+    inner_spy = AISpymaster(
         matrix,
         clue_vocab,
-        risk=cfg.risk,
+        risk=cfg.risk.base_risk,
         top_k=cfg.top_k_trace,
         reranker=spy_reranker,
         weights=spy_weights,
     )
-    guesser = AIGuesser(
+    dyn = _dynamic_risk_policy(cfg)
+    spymaster = (
+        DynamicRiskAISpymaster(inner_spy, base_risk=cfg.risk.base_risk, policy=dyn)
+        if dyn.enabled
+        else inner_spy
+    )
+    inner_g = AIGuesser(
         matrix,
-        risk=cfg.risk,
+        risk=cfg.risk.base_risk,
         reranker=guess_reranker,
         sampling_temperature=cfg.guesser.sampling_temperature,
         sampling_top_k=cfg.guesser.sampling_top_k,
+    )
+    guesser = (
+        DynamicRiskAIGuesser(inner_g, base_risk=cfg.risk.base_risk, policy=dyn)
+        if dyn.enabled
+        else inner_g
     )
     return EvalRuntime(
         game_vocab=game_vocab,
         clue_vocab=clue_vocab,
         matrix=matrix,
-        spymaster=spymaster,
+        spymaster=spymaster,  # may be DynamicRiskAISpymaster when enabled
         guesser=guesser,
+        dynamic_risk_policy=dyn,
     )

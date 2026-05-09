@@ -15,7 +15,7 @@ def test_pwa_index_when_built():
     client = TestClient(create_app())
     r = client.get("/app/")
     assert r.status_code == 200
-    assert "Code Names AI" in r.text
+    assert "Word Guess AI" in r.text
 
 
 def test_pwa_unknown_route_serves_spa_shell():
@@ -24,4 +24,4 @@ def test_pwa_unknown_route_serves_spa_shell():
     client = TestClient(create_app())
     r = client.get("/app/play/fake-id-for-spa-fallback")
     assert r.status_code == 200
-    assert "root" in r.text or "Code Names" in r.text
+    assert "root" in r.text or "Word Guess" in r.text

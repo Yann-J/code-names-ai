@@ -1,13 +1,10 @@
-import math
-
 import pytest
 
-from codenames_ai.agent.scoring import ScoringWeights, freq_bonus
+from codenames_ai.agent.scoring import ScoringWeights
 
 
 class TestScoringWeightsFromRisk:
     def test_clamped_to_zero(self):
-        # risk=0 should clamp negative inputs.
         cautious = ScoringWeights.from_risk(-0.5)
         ref = ScoringWeights.from_risk(0.0)
         assert cautious == ref
@@ -21,57 +18,34 @@ class TestScoringWeightsFromRisk:
         cautious = ScoringWeights.from_risk(0.0)
         aggressive = ScoringWeights.from_risk(1.0)
         assert cautious.margin_floor > aggressive.margin_floor
-        assert cautious.margin_weight > aggressive.margin_weight
-
-    def test_aggressive_rewards_ambition_more(self):
-        cautious = ScoringWeights.from_risk(0.0)
-        aggressive = ScoringWeights.from_risk(1.0)
-        assert aggressive.ambition_weight > cautious.ambition_weight
-
-    def test_cautious_penalizes_assassin_more(self):
-        cautious = ScoringWeights.from_risk(0.0)
-        aggressive = ScoringWeights.from_risk(1.0)
-        assert cautious.assassin_weight > aggressive.assassin_weight
         assert cautious.assassin_ceiling < aggressive.assassin_ceiling
+
+    def test_cautious_mc_sharper_than_aggressive(self):
+        cautious = ScoringWeights.from_risk(0.0)
+        aggressive = ScoringWeights.from_risk(1.0)
+        assert cautious.mc_temperature < aggressive.mc_temperature
+
+    def test_mc_rank_bias_larger_when_cautious(self):
+        """Rank bias concentrates softmax on top cosine matches when gaps are shallow."""
+        cautious = ScoringWeights.from_risk(0.0)
+        aggressive = ScoringWeights.from_risk(1.0)
+        assert cautious.mc_rank_bias > aggressive.mc_rank_bias
+
+    def test_intermediate_mc_rank_bias_between_extremes(self):
+        cautious = ScoringWeights.from_risk(0.0)
+        mid = ScoringWeights.from_risk(0.5)
+        aggressive = ScoringWeights.from_risk(1.0)
+        assert cautious.mc_rank_bias >= mid.mc_rank_bias >= aggressive.mc_rank_bias
 
     def test_intermediate_risk_lies_between_extremes(self):
         cautious = ScoringWeights.from_risk(0.0)
         mid = ScoringWeights.from_risk(0.5)
         aggressive = ScoringWeights.from_risk(1.0)
-        # margin_floor monotonically decreases with risk
         assert cautious.margin_floor >= mid.margin_floor >= aggressive.margin_floor
-        # ambition_weight monotonically increases with risk
-        assert cautious.ambition_weight <= mid.ambition_weight <= aggressive.ambition_weight
+        assert cautious.mc_temperature <= mid.mc_temperature <= aggressive.mc_temperature
 
-    def test_undercluster_penalty_weight_decreases_with_risk(self):
-        cautious = ScoringWeights.from_risk(0.0)
-        aggressive = ScoringWeights.from_risk(1.0)
-        assert cautious.undercluster_penalty_weight >= aggressive.undercluster_penalty_weight
-
-    def test_prefer_min_targets_is_three(self):
-        assert ScoringWeights.from_risk(0.5).prefer_min_targets == 3
-
-
-class TestFreqBonus:
-    def test_zero_at_zipf_3(self):
-        # tanh((3 - 3) / 2) == 0
-        assert freq_bonus(3.0, freq_weight=0.10) == pytest.approx(0.0)
-
-    def test_positive_above_pivot(self):
-        assert freq_bonus(5.0, freq_weight=0.10) > 0
-
-    def test_negative_below_pivot(self):
-        assert freq_bonus(2.0, freq_weight=0.10) < 0
-
-    def test_saturates_at_high_zipf(self):
-        # tanh saturates near 1; at Zipf 8 the bonus should be ~ freq_weight * 0.999
-        assert freq_bonus(8.0, freq_weight=0.10) == pytest.approx(
-            0.10 * math.tanh(2.5), abs=1e-6
-        )
-        # Increasing Zipf further barely moves the value.
-        assert freq_bonus(9.0, freq_weight=0.10) - freq_bonus(8.0, freq_weight=0.10) < 0.01
-
-    def test_scales_with_freq_weight(self):
-        a = freq_bonus(5.0, freq_weight=0.10)
-        b = freq_bonus(5.0, freq_weight=0.20)
-        assert b == pytest.approx(2 * a)
+    def test_default_rewards_stable(self):
+        w = ScoringWeights.from_risk(0.5)
+        assert w.reward_friendly == pytest.approx(1.0)
+        assert w.lane_max_n == 7
+        assert w.mc_trials == 96

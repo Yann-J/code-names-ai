@@ -1,11 +1,34 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ApiSpinnerOverlay } from '../components/ApiSpinnerOverlay'
 import { postAnalysis } from '../api'
 import './AnalysisPage.css'
 
+const MAX_ANALYSIS_SEED = 2_147_483_647
+
+function nextRandomSeed(): number {
+  return Math.floor(Math.random() * MAX_ANALYSIS_SEED)
+}
+
+function parseSeedParam(searchParams: URLSearchParams): number | undefined {
+  const raw = searchParams.get('seed')
+  if (raw == null || raw === '') return undefined
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function parseRiskParam(searchParams: URLSearchParams): number | undefined {
+  const raw = searchParams.get('risk')
+  if (raw == null || raw === '') return undefined
+  const n = Number.parseFloat(raw)
+  if (!Number.isFinite(n)) return undefined
+  return Math.min(1, Math.max(0, n))
+}
+
 export function AnalysisPage() {
-  const [seed, setSeed] = useState(0)
-  const [risk, setRisk] = useState(0.5)
+  const [searchParams] = useSearchParams()
+  const [seed, setSeed] = useState(() => parseSeedParam(searchParams) ?? nextRandomSeed())
+  const [risk, setRisk] = useState(() => parseRiskParam(searchParams) ?? 0.5)
   const [data, setData] = useState<Awaited<ReturnType<typeof postAnalysis>> | null>(null)
   const [activeTeam, setActiveTeam] = useState<'red' | 'blue'>('red')
   const [err, setErr] = useState<string | null>(null)
@@ -13,8 +36,15 @@ export function AnalysisPage() {
 
   const currentTrace = data ? data.traces[activeTeam.toUpperCase()] ?? null : null
 
+  useEffect(() => {
+    const ps = parseSeedParam(searchParams)
+    const pr = parseRiskParam(searchParams)
+    if (ps !== undefined) setSeed(ps)
+    if (pr !== undefined) setRisk(pr)
+  }, [searchParams])
+
   function randomizeSeed() {
-    setSeed(Math.floor(Math.random() * 2_147_483_647))
+    setSeed(nextRandomSeed())
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -102,6 +132,17 @@ export function AnalysisPage() {
 
           {currentTrace ? (
             <>
+              {currentTrace.risk_snapshot != null ? (
+                <p className="muted risk-snapshot" style={{ marginBottom: '0.75rem' }}>
+                  {currentTrace.risk_snapshot.dynamic_enabled ? 'Dynamic risk' : 'Risk context'}: base{' '}
+                  {currentTrace.risk_snapshot.base_risk.toFixed(2)} → effective{' '}
+                  {currentTrace.risk_snapshot.effective_risk.toFixed(2)} (Δ objectives{' '}
+                  {currentTrace.risk_snapshot.delta_objectives >= 0 ? '+' : ''}
+                  {currentTrace.risk_snapshot.delta_objectives.toFixed(0)}: ours{' '}
+                  {currentTrace.risk_snapshot.ours_unrevealed}, theirs{' '}
+                  {currentTrace.risk_snapshot.theirs_unrevealed})
+                </p>
+              ) : null}
               <h2>Chosen</h2>
               {currentTrace.chosen ? (
                 <p>
@@ -123,7 +164,7 @@ export function AnalysisPage() {
                       <th title="Single-word clue proposal">clue</th>
                       <th title="Number of intended target cards.">N</th>
                       <th title="Intended target words for this candidate clue.">target words</th>
-                      <th title="Final weighted score used for candidate ranking (after any reranking).">final score</th>
+                      <th title="Final ranking score after optional LLM rerank (blend of MC EV and LLM value).">final score</th>
                       <th title="Raw expected reward estimate before weighting. Higher is generally better.">exp. reward</th>
                       <th title="Safety margin versus dangerous cards; higher means safer separation.">margin</th>
                       <th title="Embedding-only score before optional LLM reranking.">embedding</th>

@@ -128,6 +128,11 @@ export function PlayGamePage() {
     [state?.turn_history],
   )
 
+  const analysisHref = useMemo(() => {
+    if (!state) return '/analysis'
+    return `/analysis?${new URLSearchParams({ seed: String(state.seed), risk: String(state.risk) }).toString()}`
+  }, [state])
+
   async function run<T>(fn: () => Promise<T>): Promise<void> {
     setBusy(true)
     setErr(null)
@@ -174,6 +179,9 @@ export function PlayGamePage() {
   const activeClue =
     phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0)
   const teamKey = teamSide(state.current_team)
+  const showSpymasterForm = state.ui.show_spymaster_form
+  const cluePanelIdle = guesserIdle && !showSpymasterForm
+  const cluePanelActive = activeClue || showSpymasterForm
 
   const fx = state.guess_flash
   const showEndModal = state.is_over && dismissedEndModalFor !== state.id
@@ -216,76 +224,122 @@ export function PlayGamePage() {
       </div>
 
       <div
-        className={`clue-panel${guesserIdle ? ' idle' : ''}${activeClue ? ` clue-panel--active clue-panel--team-${teamKey}` : ''}`}
+        className={`clue-panel${cluePanelIdle ? ' idle' : ''}${cluePanelActive ? ` clue-panel--active clue-panel--team-${teamKey}` : ''}`}
       >
-        <div className="clue-panel-inner">
-          <div>
-            <div className="clue-label">
-              {phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0)
-                ? 'Active clue'
-                : 'Clue'}
+        <div className={`clue-panel-inner${showSpymasterForm ? ' clue-panel-inner--spymaster' : ''}`}>
+          {showSpymasterForm ? (
+            <div className="clue-spymaster-block">
+              <div className="clue-label clue-label--row">
+                Your clue
+                <span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team} spymaster</span>
+              </div>
+              <p className="clue-spymaster-hint muted">
+                If the guesser is AI, the clue word must exist in the embedding matrix (use common English words).
+              </p>
+              <form className="clue-spymaster-form" onSubmit={onSpymaster}>
+                <label>
+                  Word{' '}
+                  <input
+                    type="text"
+                    value={clueWord}
+                    onChange={(e) => setClueWord(e.target.value)}
+                    pattern="[a-zA-Z\-]+"
+                    required
+                  />
+                </label>
+                <label>
+                  Count{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    max={9}
+                    value={clueCount}
+                    onChange={(e) => setClueCount(+e.target.value)}
+                    required
+                  />
+                </label>
+                <button type="submit" className="btn-primary" disabled={busy}>
+                  Give clue
+                </button>
+              </form>
             </div>
-            {phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0) ? (
-              <>
-                <div className="clue-main">
-                  {clue.word}
-                  <span className="clue-count">{clue.count}</span>
+          ) : (
+            <>
+              <div>
+                <div className="clue-label">
+                  {phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0)
+                    ? 'Active clue'
+                    : 'Clue'}
                 </div>
-                {state.guesser_attempts_remaining != null ? (
-                  <div className="attempts-badge">
-                    Guesses remaining this clue: {state.guesser_attempts_remaining}
+                {phase === 'GUESSER' && clue && !(clue.word === '' && clue.count === 0) ? (
+                  <>
+                    <div className="clue-main">
+                      {clue.word}
+                      <span className="clue-count">{clue.count}</span>
+                    </div>
+                    {state.guesser_attempts_remaining != null ? (
+                      <div className="attempts-badge">
+                        Guesses remaining this clue: {state.guesser_attempts_remaining}
+                      </div>
+                    ) : null}
+                  </>
+                ) : clue && !(clue.word === '' && clue.count === 0) ? (
+                  <div className="clue-main muted" style={{ fontSize: '1.25rem', color: 'var(--muted)' }}>
+                    Last: {clue.word}
+                    <span className="clue-count">{clue.count}</span>
                   </div>
-                ) : null}
-              </>
-            ) : clue && !(clue.word === '' && clue.count === 0) ? (
-              <div className="clue-main muted" style={{ fontSize: '1.25rem', color: 'var(--muted)' }}>
-                Last: {clue.word}
-                <span className="clue-count">{clue.count}</span>
+                ) : (
+                  <div className="clue-main muted" style={{ fontSize: '1.1rem' }}>
+                    —
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="clue-main muted" style={{ fontSize: '1.1rem' }}>
-                —
-              </div>
-            )}
-          </div>
-          {state.ui.show_end_turn ? (
-            <button type="button" className="end-turn-btn" disabled={busy} onClick={() => onEndTurn()}>
-              End turn
-            </button>
-          ) : null}
+              {state.ui.show_end_turn ? (
+                <button type="button" className="end-turn-btn" disabled={busy} onClick={() => onEndTurn()}>
+                  End turn
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
 
-      <div className="board-wrap">
-        {state.cards.map((c) => {
-          const back = c.revealed && c.revealed_as ? colorClass(c.revealed_as) : colorClass('neutral')
-          const sec = secretAttr(c, spyOn)
-          const can = state.ui.can_click_guess && !c.revealed
-          return (
-            <div
-              key={c.word}
-              className={`card-slot${c.revealed ? ' is-revealed' : ''}`}
-              data-secret={sec}
-            >
-              {can ? (
-                <button
-                  type="button"
-                  className="card-hit"
-                  disabled={busy}
-                  aria-label={`Guess ${c.word}`}
-                  onClick={() => onCardGuess(c.word)}
-                />
-              ) : null}
-              <div className="card-inner">
-                <div className="card-face card-front">
-                  {c.word}
-                  {c.revealed ? ' ✓' : ''}
+      <div className="board-outer">
+        <div className="board-wrap">
+          {state.cards.map((c) => {
+            const back = c.revealed && c.revealed_as ? colorClass(c.revealed_as) : colorClass('neutral')
+            const sec = secretAttr(c, spyOn)
+            const can = state.ui.can_click_guess && !c.revealed
+            return (
+              <div
+                key={c.word}
+                className={`card-slot${c.revealed ? ' is-revealed' : ''}`}
+                data-secret={sec}
+              >
+                {can ? (
+                  <button
+                    type="button"
+                    className="card-hit"
+                    disabled={busy}
+                    aria-label={`Guess ${c.word}`}
+                    onClick={() => onCardGuess(c.word)}
+                  />
+                ) : null}
+                <div className="card-inner">
+                  <div className="card-face card-front">
+                    <span className="card-word">
+                      {c.word}
+                      {c.revealed ? ' ✓' : ''}
+                    </span>
+                  </div>
+                  <div className={`card-face card-back ${back}`}>
+                    <span className="card-word">{c.word}</span>
+                  </div>
                 </div>
-                <div className={`card-face card-back ${back}`}>{c.word}</div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
 
       <div className="history-block">
@@ -352,51 +406,16 @@ export function PlayGamePage() {
         )}
       </div>
 
-      {state.ui.waiting_on_ai ? (
-        <p className="status-line muted">Waiting on AI…</p>
-      ) : state.ui.show_spymaster_form ? (
-        <div className="action-panel">
-          <h2>
-            Your clue (<span className={`history-team-tag history-team-tag--${teamKey}`}>{state.current_team}</span>{' '}
-            spymaster)
-          </h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            If the guesser is AI, the clue word must exist in the embedding matrix (use common English words).
-          </p>
-          <form onSubmit={onSpymaster}>
-            <label>
-              Word{' '}
-              <input
-                type="text"
-                value={clueWord}
-                onChange={(e) => setClueWord(e.target.value)}
-                pattern="[a-zA-Z\-]+"
-                required
-              />
-            </label>
-            <label>
-              Count{' '}
-              <input
-                type="number"
-                min={0}
-                max={9}
-                value={clueCount}
-                onChange={(e) => setClueCount(+e.target.value)}
-                required
-              />
-            </label>
-            <button type="submit" className="btn-primary" disabled={busy} style={{ marginLeft: '0.5rem' }}>
-              Give clue
-            </button>
-          </form>
-        </div>
-      ) : null}
+      {state.ui.waiting_on_ai ? <p className="status-line muted">Waiting on AI…</p> : null}
 
       <footer className="play-footer">
         <p className="session-meta muted">
           Session: <code>{state.id}</code> · Seed: <code>{state.seed}</code>
         </p>
-        {state.is_over ? <Link to="/play">New game</Link> : null}
+        <div className="play-footer-links">
+          <Link to={analysisHref}>Analyze this board</Link>
+          {state.is_over ? <Link to="/play">New game</Link> : null}
+        </div>
       </footer>
 
       {showEndModal ? (
@@ -411,14 +430,13 @@ export function PlayGamePage() {
               Replay or analyze this same game with seed <code>{state.seed}</code>.
             </p>
             <p className="muted endgame-modal__hint">
-              Use this seed in the New Game advanced section, or in Spymaster Analysis to inspect suggestions on this
-              board.
+              The Open analysis button pre-fills seed and risk so Spymaster Analysis samples the same board layout.
             </p>
             <div className="endgame-modal__actions">
               <Link to="/play" className="btn-primary">
                 Start a new game
               </Link>
-              <Link to="/analysis" className="btn-secondary">
+              <Link to={analysisHref} className="btn-secondary">
                 Open analysis
               </Link>
               <button type="button" className="btn-secondary" onClick={() => setDismissedEndModalFor(state.id)}>

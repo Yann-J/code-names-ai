@@ -6,6 +6,8 @@ answer is computable by inspection, then asserts the spymaster picks it.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -109,12 +111,16 @@ class TestBasicBehavior:
             neutral=_board_words("n", 7),
             assassin="ass",
         )
-        spymaster = AISpymaster(matrix, vocab, risk=0.5)
+        spymaster = AISpymaster(
+            matrix,
+            vocab,
+            risk=0.5,
+            weights=replace(ScoringWeights.from_risk(0.5), lane_max_n=9),
+        )
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
 
         assert trace.chosen is not None
         assert trace.chosen.clue == "good_clue"
-        # All 9 friendlies are aligned ⇒ N should be the maximum.
         assert trace.chosen.n == 9
 
     def test_top_candidates_sorted_descending(self):

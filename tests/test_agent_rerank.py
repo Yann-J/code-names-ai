@@ -9,6 +9,7 @@ import pytest
 from codenames_ai.agent.rerank import (
     GuesserReranker,
     SpymasterReranker,
+    _friendlies_remaining,
     _parse_response,
 )
 from codenames_ai.agent.spymaster import AISpymaster
@@ -56,8 +57,7 @@ class TestParseResponse:
 
     def test_drops_out_of_range_indices(self):
         text = json.dumps(
-            {"scores": [{"index": 0, "score": 0.5, "reason": ""},
-                        {"index": 99, "score": 0.5, "reason": ""}]}
+            {"scores": [{"index": 0, "score": 0.5, "reason": ""}, {"index": 99, "score": 0.5, "reason": ""}]}
         )
         parsed = _parse_response(text, expected_count=3)
         assert parsed == {}
@@ -129,10 +129,8 @@ def _basic_setup_with_two_clues():
 class TestSpymasterReranker:
     def test_system_prompt_mentions_root_overlap_penalty(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
-        llm = FakeLLM(
-            '{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}'
-        )
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
+        llm = FakeLLM('{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}')
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         assert llm.calls
@@ -142,13 +140,6 @@ class TestSpymasterReranker:
 
     def test_blends_score_and_marks_llm_fields(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
-        # LLM strongly prefers 'clue_b' over 'clue_a'.
-        # Order in shortlist depends on embedding-rank, which we don't pre-know,
-        # so respond with both indices and pick the one matching 'clue_b'.
-        # Prepare the response as if shortlist[1] is the preferred one, but
-        # since we don't know which order the embedding ranker put them in,
-        # we score by clue name in the prompt body. Easiest: have FakeLLM
-        # return the same response regardless.
         rerank_response = json.dumps(
             {
                 "scores": [
@@ -158,23 +149,21 @@ class TestSpymasterReranker:
             }
         )
         llm = FakeLLM(rerank_response)
-        reranker = SpymasterReranker(
-            llm, top_k=2, blend_alpha=0.0, ev_llm_gain=0.0
-        )  # alpha=0 → only LLM
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
-        trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
+        view = SpymasterView(board=board, team=Color.RED)
+        trace = spymaster.give_clue(view)
 
-        # Top candidate must have the higher LLM score.
+        assert trace.chosen is not None
         assert trace.chosen.llm_score == 0.95
         assert trace.chosen.llm_reason == "strong"
-        # Embedding score is preserved.
         assert trace.chosen.embedding_score is not None
-        # And final score equals the blended value.
-        assert trace.chosen.score == pytest.approx(0.95)
+        f_left = _friendlies_remaining(view)
+        n_eff = min(trace.chosen.n, f_left)
+        assert trace.chosen.score == pytest.approx(0.95 * n_eff)
 
-    def test_alpha_one_keeps_embedding_ordering(self):
+    def test_alpha_one_keeps_embedding_ev_ordering_weights(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
-        # With alpha=1, blended == normalized embedding regardless of LLM.
         rerank_response = json.dumps(
             {
                 "scores": [
@@ -184,19 +173,20 @@ class TestSpymasterReranker:
             }
         )
         llm = FakeLLM(rerank_response)
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=1.0, ev_llm_gain=0.0)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=1.0)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
-        # Top candidate's LLM fields are populated even with alpha=1.
+        assert trace.chosen is not None
         assert trace.chosen.llm_score == 0.0
+        assert trace.chosen.score == pytest.approx(trace.chosen.embedding_score)
 
     def test_missing_response_falls_back_to_embedding_score(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
         llm = FakeLLM("not json")
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         trace = spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
-        # No LLM data on chosen — fall back was triggered.
+        assert trace.chosen is not None
         assert trace.chosen.llm_score is None
 
     def test_invalid_alpha_raises(self):
@@ -206,7 +196,7 @@ class TestSpymasterReranker:
     def test_llm_called_in_json_mode(self):
         matrix, vocab, board = _basic_setup_with_two_clues()
         llm = FakeLLM('{"scores": [{"index": 1, "score": 0.5, "reason": ""}]}')
-        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5, ev_llm_gain=0.0)
+        reranker = SpymasterReranker(llm, top_k=2, blend_alpha=0.5)
         spymaster = AISpymaster(matrix, vocab, risk=0.5, reranker=reranker)
         spymaster.give_clue(SpymasterView(board=board, team=Color.RED))
         assert llm.calls
@@ -247,12 +237,6 @@ class TestGuesserReranker:
 
     def test_llm_can_demote_a_high_similarity_card(self):
         matrix, board = self._matrix_and_board()
-        # Embedding ranking would put 'a' first, then 'b'. LLM strongly prefers 'b'.
-        # The embedding ordering of the shortlist is by sim desc, so:
-        #   index 1 = 'a'  (sim ~ 1.0)
-        #   index 2 = 'b'  (sim ~ 0.998)
-        #   index 3 = 'c'  (sim < 0)
-        # Force LLM to demote index 1.
         rerank_response = json.dumps(
             {
                 "scores": [
@@ -263,11 +247,9 @@ class TestGuesserReranker:
             }
         )
         llm = FakeLLM(rerank_response)
-        reranker = GuesserReranker(llm, blend_alpha=0.0)  # LLM-only blend
+        reranker = GuesserReranker(llm, blend_alpha=0.0)
         guesser = AIGuesser(matrix, risk=0.5, reranker=reranker)
-        trace = guesser.guess(
-            GuesserView(board=board, team=Color.RED), Clue("clue", 1)
-        )
+        trace = guesser.guess(GuesserView(board=board, team=Color.RED), Clue("clue", 1))
         assert trace.guesses == ("b",)
 
     def test_llm_metadata_attached_to_committed_picks(self):
@@ -284,9 +266,7 @@ class TestGuesserReranker:
         llm = FakeLLM(rerank_response)
         reranker = GuesserReranker(llm, blend_alpha=0.5)
         guesser = AIGuesser(matrix, risk=1.0, reranker=reranker)
-        trace = guesser.guess(
-            GuesserView(board=board, team=Color.RED), Clue("clue", 2)
-        )
+        trace = guesser.guess(GuesserView(board=board, team=Color.RED), Clue("clue", 2))
         committed = [c for c in trace.candidates if c.committed]
         for c in committed:
             assert c.llm_score is not None
