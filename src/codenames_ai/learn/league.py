@@ -304,6 +304,7 @@ def _run_one_game(task: dict[str, Any]) -> dict[str, Any]:
         top_k=_WORKER_CFG.top_k_trace,
         reranker=None,
         weights=_build_scoring_weights_for_policy(_WORKER_CFG, red_params),
+        clue_surface_exclusions=_WORKER_RUNTIME.clue_surface_exclusions,
     )
     spy_blue = AISpymaster(
         _WORKER_RUNTIME.matrix,
@@ -312,6 +313,7 @@ def _run_one_game(task: dict[str, Any]) -> dict[str, Any]:
         top_k=_WORKER_CFG.top_k_trace,
         reranker=None,
         weights=_build_scoring_weights_for_policy(_WORKER_CFG, blue_params),
+        clue_surface_exclusions=_WORKER_RUNTIME.clue_surface_exclusions,
     )
     guesser_red = AIGuesser(
         _WORKER_RUNTIME.matrix,

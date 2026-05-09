@@ -61,6 +61,32 @@ class Game:
         self.guesser_traces: list[GuesserTrace] = []
         self._clue_count = 0
 
+    @classmethod
+    def from_state(
+        cls,
+        state: GameState,
+        *,
+        red_spymaster: Spymaster,
+        red_guesser: Guesser,
+        blue_spymaster: Spymaster,
+        blue_guesser: Guesser,
+        max_clues: int = 50,
+    ) -> Game:
+        """Build a game anchored on an existing ``GameState`` (fork / resume)."""
+        self = object.__new__(cls)
+        self._players = {
+            (Color.RED, "spymaster"): red_spymaster,
+            (Color.RED, "guesser"): red_guesser,
+            (Color.BLUE, "spymaster"): blue_spymaster,
+            (Color.BLUE, "guesser"): blue_guesser,
+        }
+        self.max_clues = max_clues
+        self.state = state
+        self.spymaster_traces = []
+        self.guesser_traces = []
+        self._clue_count = sum(1 for ev in state.turn_history if ev.kind == "CLUE")
+        return self
+
     def step(self) -> GameState:
         """Advance one phase. No-op if the game is already over."""
         if self.state.is_over:
@@ -79,7 +105,16 @@ class Game:
     def _step_spymaster(self) -> None:
         team = self.state.current_team
         spymaster: Spymaster = self._players[(team, "spymaster")]  # type: ignore[assignment]
-        view = SpymasterView(board=self.state.board, team=team)
+        prior_clues = frozenset(
+            ev.clue.word.lower()
+            for ev in self.state.turn_history
+            if ev.kind == "CLUE"
+            and ev.clue is not None
+            and not ev.clue.is_pass()
+        )
+        view = SpymasterView(
+            board=self.state.board, team=team, prior_clue_words=prior_clues
+        )
 
         try:
             trace = spymaster.give_clue(view)

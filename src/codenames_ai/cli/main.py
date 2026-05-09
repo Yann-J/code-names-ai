@@ -236,7 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-v",
         "--verbose",
         action="store_true",
-        help="DEBUG logging",
+        help="DEBUG logging (overrides LOG_LEVEL)",
     )
     sub = p.add_subparsers(dest="command", required=True)
 

@@ -247,11 +247,3 @@ codenames_ai/
 ```
 
 The dependency graph flows one way: `game` → `agent` → `llm/embedding/vocab`. The CLI and web layers sit on top and import everything. The top-level `codenames_ai` package re-exports the full public surface.
-
-## TODO
-
-[] Automate refresh of word blacklist from e.g. <https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/master>
-[] Add French
-[] RL to fine-tune the clue scoring parameters
-[] Shareable URLs with real-time updates via websocket to play remotely
-[] Tune Guesser AI

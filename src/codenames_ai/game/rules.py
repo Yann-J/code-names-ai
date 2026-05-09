@@ -124,11 +124,15 @@ def is_legal_clue(
     clue_lemma: str,
     active_cards: list[Card] | tuple[Card, ...],
     strictness: RuleStrictness = "lemma_substring",
+    forbidden_surfaces: frozenset[str] | None = None,
 ) -> bool:
     """Whether a single-word clue is legal given the unrevealed board.
 
     Always rejects when clue surface or lemma is within Levenshtein distance 1 of a
     board surface or lemma, if both strings are at least 5 letters (e.g. rumors/rumours).
+
+    When ``forbidden_surfaces`` is set, rejects when ``clue_surface`` (normalized
+    lowercase) is a member — used for match-level clue reuse and curated exclusions.
 
     Default strictness ("lemma_substring") additionally rejects:
       - exact surface or lemma match against any active card
@@ -142,6 +146,8 @@ def is_legal_clue(
 
     cs = clue_surface.lower()
     cl = clue_lemma.lower()
+    if forbidden_surfaces and cs in forbidden_surfaces:
+        return False
 
     for card in active_cards:
         bs = card.word.lower()

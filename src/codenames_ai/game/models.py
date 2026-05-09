@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -59,10 +59,16 @@ class Clue:
 
 @dataclass(frozen=True)
 class SpymasterView:
-    """A spymaster's view of the game: full board (all colors visible to them)."""
+    """A spymaster's view of the game: full board (all colors visible to them).
+
+    ``prior_clue_words`` collects normalized clue surfaces already played this
+    match (Codenames forbids repeating a clue word). Static vocabulary exclusions
+    are applied separately inside ``AISpymaster``.
+    """
 
     board: Board
     team: Color
+    prior_clue_words: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)

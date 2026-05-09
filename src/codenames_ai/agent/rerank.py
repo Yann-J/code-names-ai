@@ -49,10 +49,16 @@ _SPYMASTER_SYSTEM = (
     "When several candidates have a plausible semantic link, prefer those that cover "
     "more of the listed targets together (multi-word plays are better than a count of 1 "
     "unless a single-target reading is clearly the only fair one). "
+    "Score at or near 0.0 when a clue would break official play: any clue word that repeats "
+    "one already used this match (listed in the user message when non-empty), vulgar or "
+    "gravely offensive wording, or unfair morphological ties to an active board word — "
+    "treat as the same \"word family\" obvious inflections, participles, gerunds, agent nouns, "
+    "and derivations a human would link to the same origin as a board card (e.g. run/running/runner, "
+    "photograph/photography). The pipeline already runs automated lemma and substring checks "
+    "that catch many such cases; yours is the safety net for what those miss. "
     "Penalize clues whose meaning is closer to non-friendly cards, especially the "
-    "ASSASSIN (in this case mention which ones), clues with awkward double meanings, clues whose count claims "
-    "more targets than the connection actually supports, clues that share a clear word root with any active board word "
-    "(e.g. indicate/indication/indicator), and clues that are too vulgar or offensive. Be discriminating — "
+    "ASSASSIN (in this case mention which ones), awkward double meanings, and counts that claim "
+    "more targets than the connection supports. Be discriminating — "
     "most candidates should NOT score 1.0.\n\n"
     "Respond with strict JSON of shape:\n"
     '{"scores": [{"clue":"<clue>", "targets": ["<target1>",...],  "index": <int 1-based>, "score": <float 0..1>, "reason": "<short>"}, ...]}'
@@ -214,6 +220,13 @@ class SpymasterReranker:
         for card in view.board.active():
             lines.append(f"- {card.word} [{card.color.value}]")
         lines.append("")
+        prior = sorted(view.prior_clue_words)
+        if prior:
+            lines.append(
+                "Clue words already submitted earlier this match (illegal to reuse; score repeats ~0): "
+                + ", ".join(prior)
+            )
+            lines.append("")
         lines.append("Candidate clues:")
         for i, c in enumerate(shortlist, start=1):
             lines.append(f'{i}. clue="{c.clue}" targets={list(c.targets)} N={c.n}')

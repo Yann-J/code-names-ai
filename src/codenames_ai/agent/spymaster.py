@@ -105,6 +105,7 @@ class AISpymaster(Spymaster):
         rule_strictness: RuleStrictness = "lemma_substring",
         top_k: int = 200,
         reranker: SpymasterReranker | None = None,
+        clue_surface_exclusions: frozenset[str] = frozenset(),
     ) -> None:
         self.matrix = matrix
         self.clue_vocabulary = clue_vocabulary
@@ -112,6 +113,7 @@ class AISpymaster(Spymaster):
         self.rule_strictness = rule_strictness
         self.top_k = top_k
         self.reranker = reranker
+        self._clue_surface_exclusions = clue_surface_exclusions
         self._clue_index = _ClueIndex.build(clue_vocabulary, matrix)
         if not self._clue_index.surfaces:
             raise ValueError(
@@ -170,6 +172,8 @@ class AISpymaster(Spymaster):
         )
         best_non_friendly = np.maximum.reduce([best_opp, best_neutral, sim_assassin])
 
+        forbidden_surfaces = self._clue_surface_exclusions | view.prior_clue_words
+
         candidates, veto_count, illegal_count = self._score_all(
             clue_idx=clue_idx,
             team=team,
@@ -180,6 +184,7 @@ class AISpymaster(Spymaster):
             sim_assassin=sim_assassin,
             sim_all=sim_all,
             active_cards=active,
+            forbidden_surfaces=forbidden_surfaces,
         )
 
         candidates.sort(key=lambda c: c.score, reverse=True)
@@ -333,6 +338,7 @@ class AISpymaster(Spymaster):
         sim_assassin: np.ndarray,
         sim_all: np.ndarray,
         active_cards: list[Card],
+        forbidden_surfaces: frozenset[str],
     ) -> tuple[list[Candidate], int, int]:
         weights = self.weights
         F = sorted_friendly.shape[1]
@@ -357,6 +363,7 @@ class AISpymaster(Spymaster):
                 clue_lemma=lemma,
                 active_cards=active_cards,
                 strictness=self.rule_strictness,
+                forbidden_surfaces=forbidden_surfaces,
             ):
                 illegal_count += max_n  # one illegal clue → rejected for each ``N``
                 continue

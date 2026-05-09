@@ -22,6 +22,7 @@ from codenames_ai.llm.cache import LLMCache
 from codenames_ai.llm.provider import OpenAICompatibleProvider
 from codenames_ai.storage import StoragePaths
 from codenames_ai.vocab.builder import load_or_build_vocabulary
+from codenames_ai.vocab.filters import load_exclusions
 from codenames_ai.vocab.models import Vocabulary, VocabConfig
 
 
@@ -30,6 +31,7 @@ class EvalRuntime:
     game_vocab: Vocabulary
     clue_vocab: Vocabulary
     matrix: EmbeddingMatrix
+    clue_surface_exclusions: frozenset[str]
     spymaster: Spymaster
     guesser: Guesser
     dynamic_risk_policy: DynamicRiskPolicy
@@ -143,6 +145,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         if value is not None:
             updates[key] = value
     spy_weights = replace(base, **updates)
+    clue_surface_exclusions = load_exclusions(cfg.vocabulary.exclusions_path)
     inner_spy = AISpymaster(
         matrix,
         clue_vocab,
@@ -150,6 +153,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         top_k=cfg.top_k_trace,
         reranker=spy_reranker,
         weights=spy_weights,
+        clue_surface_exclusions=clue_surface_exclusions,
     )
     dyn = _dynamic_risk_policy(cfg)
     spymaster = (
@@ -173,6 +177,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         game_vocab=game_vocab,
         clue_vocab=clue_vocab,
         matrix=matrix,
+        clue_surface_exclusions=clue_surface_exclusions,
         spymaster=spymaster,  # may be DynamicRiskAISpymaster when enabled
         guesser=guesser,
         dynamic_risk_policy=dyn,
