@@ -337,6 +337,24 @@ class CandidateGuessPayload(BaseModel):
     llm_reason: str | None = None
 
 
+class LLMGuessStepPayload(BaseModel):
+    """Per-physical-guess record for the LLM-primary guesser (issue #3)."""
+
+    guess: str
+    fit: dict[str, float]
+    danger: dict[str, float]
+    combined: dict[str, float]
+    lambda_danger: float
+    continue_flag: bool
+    continue_gate_passed: bool
+    gate_reason: str
+    fallback_path: str
+    model_id: str
+    schema_used: bool
+    raw_response_hash: str = ""
+    margin_to_second: float = 0.0
+
+
 class GuesserTracePayload(BaseModel):
     clue_word: str
     clue_count: int
@@ -346,6 +364,7 @@ class GuesserTracePayload(BaseModel):
     bonus_attempted: bool
     stop_reason: str
     risk_snapshot: RiskSnapshotPayload | None = None
+    llm_steps: list[LLMGuessStepPayload] = Field(default_factory=list)
 
 
 class LastAiSpymasterPayload(BaseModel):
@@ -461,4 +480,22 @@ def guesser_trace_to_payload(trace: GuesserTrace, clue: Clue) -> GuesserTracePay
         bonus_attempted=trace.bonus_attempted,
         stop_reason=trace.stop_reason,
         risk_snapshot=rs_payload,
+        llm_steps=[
+            LLMGuessStepPayload(
+                guess=s.guess,
+                fit=dict(s.fit),
+                danger=dict(s.danger),
+                combined=dict(s.combined),
+                lambda_danger=s.lambda_danger,
+                continue_flag=s.continue_flag,
+                continue_gate_passed=s.continue_gate_passed,
+                gate_reason=s.gate_reason,
+                fallback_path=s.fallback_path,
+                model_id=s.model_id,
+                schema_used=s.schema_used,
+                raw_response_hash=s.raw_response_hash,
+                margin_to_second=s.margin_to_second,
+            )
+            for s in trace.llm_steps
+        ],
     )

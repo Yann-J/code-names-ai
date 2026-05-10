@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Mapping
 
 from codenames_ai.agent.scoring import ScoringWeights, StopPolicy
 from codenames_ai.game.models import Clue
@@ -100,6 +101,35 @@ class CandidateGuess:
 
 
 @dataclass(frozen=True)
+class LLMGuessStep:
+    """Per-physical-guess record for the LLM-primary guesser.
+
+    One entry per LLM call within a turn. ``fit`` and ``danger`` cover every
+    unrevealed word that was scored on this step (including the chosen one).
+    ``combined`` mirrors the engine's ``fit − λ·danger`` ranking key.
+
+    ``fallback_path`` tags how the step's scores were obtained:
+      - ``"llm_primary"``: schema-first or prompt-only LLM call succeeded.
+      - ``"embedding_fallback"``: deterministic cosine argmax after retry failed.
+      - ``"uniform_dead_end"``: random pick when embedding coverage was incomplete.
+    """
+
+    guess: str
+    fit: Mapping[str, float]
+    danger: Mapping[str, float]
+    combined: Mapping[str, float]
+    lambda_danger: float
+    continue_flag: bool
+    continue_gate_passed: bool
+    gate_reason: str
+    fallback_path: str
+    model_id: str
+    schema_used: bool
+    raw_response_hash: str = ""
+    margin_to_second: float = 0.0
+
+
+@dataclass(frozen=True)
 class GuesserTrace:
     """Full record of a guesser decision for one clue."""
 
@@ -107,5 +137,7 @@ class GuesserTrace:
     guesses: tuple[str, ...]  # the actual ordered picks the guesser commits to
     stop_policy: StopPolicy
     bonus_attempted: bool
-    stop_reason: str  # 'reached_n' | 'reached_n_plus_bonus' | 'confidence_floor' | 'no_more_candidates' | 'pass_clue'
+    stop_reason: str  # 'reached_n' | 'reached_n_plus_bonus' | 'confidence_floor' | 'no_more_candidates' | 'pass_clue' | LLM-specific reasons
     risk_snapshot: RiskSnapshot | None = None
+    llm_steps: tuple[LLMGuessStep, ...] = field(default_factory=tuple)
+    """Per-physical-guess LLM telemetry — empty for non-LLM guessers."""

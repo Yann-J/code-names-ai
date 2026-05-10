@@ -4,6 +4,9 @@ from dataclasses import dataclass, replace
 
 from codenames_ai.agent.guesser import AIGuesser
 from codenames_ai.agent.interfaces import Guesser, Spymaster
+from codenames_ai.agent.llm_guess_policy import ContinueGate
+from codenames_ai.agent.llm_guess_scorer import LLMGuessScorer, ScorerConfig
+from codenames_ai.agent.llm_guesser import LLMGuesser
 from codenames_ai.agent.rerank import GuesserReranker, SpymasterReranker
 from codenames_ai.agent.risk_context import (
     DynamicRiskAIGuesser,
@@ -91,18 +94,19 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
     provider = FastTextProvider(model_path)
     matrix = load_or_build_embedding_matrix(clue_vocab, provider, storage)
 
-    spy_reranker = None
-    guess_reranker = None
-    if scoring.llm_rerank:
+    guesser_mode = cfg.guesser.mode
+    needs_llm = scoring.llm_rerank or guesser_mode == "llm_primary"
+    llm: OpenAICompatibleProvider | None = None
+    if needs_llm:
         model = app.llm_model or "gpt-4o-mini"
         base_url = app.llm_api or "https://api.openai.com/v1"
         key = app.llm_key.get_secret_value() if app.llm_key else ""
         if not key:
             raise RuntimeError(
-                "LLM rerank is enabled but LLM_KEY "
-                "(or CODENAMES_AI_LLM_KEY) is not set. "
-                "Use embedding-only eval with --embedding-only "
-                "or set credentials."
+                "An LLM-backed feature is enabled (scoring.llm_rerank or "
+                "guesser.mode=llm_primary) but LLM_KEY (or "
+                "CODENAMES_AI_LLM_KEY) is not set. Use embedding-only eval "
+                "with --embedding-only or set credentials."
             )
         cache = LLMCache(storage.llm_cache_path)
         llm = OpenAICompatibleProvider(
@@ -112,16 +116,21 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
             cache=cache,
             temperature=0.0,
         )
+
+    spy_reranker = None
+    guess_reranker = None
+    if scoring.llm_rerank and llm is not None:
         spy_reranker = SpymasterReranker(
             llm,
             top_k=scoring.embedding_top_k,
             blend_alpha=scoring.blend_alpha,
         )
-        guess_reranker = GuesserReranker(
-            llm,
-            extra_candidates=cfg.guesser.extra_candidates,
-            blend_alpha=scoring.blend_alpha,
-        )
+        if guesser_mode == "embedding":
+            guess_reranker = GuesserReranker(
+                llm,
+                extra_candidates=cfg.guesser.extra_candidates,
+                blend_alpha=scoring.blend_alpha,
+            )
 
     base = ScoringWeights.from_risk(cfg.risk.base_risk)
     updates: dict[str, object] = {
@@ -161,18 +170,46 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
         if dyn.enabled
         else inner_spy
     )
-    inner_g = AIGuesser(
-        matrix,
-        risk=cfg.risk.base_risk,
-        reranker=guess_reranker,
-        sampling_temperature=cfg.guesser.sampling_temperature,
-        sampling_top_k=cfg.guesser.sampling_top_k,
-    )
-    guesser = (
-        DynamicRiskAIGuesser(inner_g, base_risk=cfg.risk.base_risk, policy=dyn)
-        if dyn.enabled
-        else inner_g
-    )
+    if guesser_mode == "llm_primary":
+        if llm is None:
+            raise RuntimeError(
+                "guesser.mode=llm_primary requires LLM credentials (LLM_KEY)."
+            )
+        llm_cfg = cfg.guesser.llm
+        scorer = LLMGuessScorer(
+            llm,
+            config=ScorerConfig(
+                schema_mode=llm_cfg.schema_mode,
+                retry_count=llm_cfg.retry_count,
+                keep_raw_response=llm_cfg.keep_raw_response,
+            ),
+        )
+        gate = ContinueGate(
+            min_combined=llm_cfg.min_combined,
+            min_margin_to_second=llm_cfg.min_margin_to_second,
+            min_fit=llm_cfg.min_fit,
+        )
+        guesser = LLMGuesser(
+            scorer,
+            lambda_danger=llm_cfg.lambda_danger,
+            gate=gate,
+            embedding_matrix=matrix if llm_cfg.embedding_fallback else None,
+        )
+        # LLM-primary policy owns its own continue/stop semantics — bypass the
+        # embedding-era dynamic-risk wrapper which only modulates StopPolicy.
+    else:
+        inner_g = AIGuesser(
+            matrix,
+            risk=cfg.risk.base_risk,
+            reranker=guess_reranker,
+            sampling_temperature=cfg.guesser.sampling_temperature,
+            sampling_top_k=cfg.guesser.sampling_top_k,
+        )
+        guesser = (
+            DynamicRiskAIGuesser(inner_g, base_risk=cfg.risk.base_risk, policy=dyn)
+            if dyn.enabled
+            else inner_g
+        )
     return EvalRuntime(
         game_vocab=game_vocab,
         clue_vocab=clue_vocab,

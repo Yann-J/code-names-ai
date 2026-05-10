@@ -161,10 +161,18 @@ class AIGuesser(Guesser):
             return [], False, "no_more_candidates"
 
         policy = self.stop_policy
-        guesses: list[CandidateGuess] = []
-        # Always commit to one pick (declining outright is a wasted turn).
+        # Stochastic sampling decides *which* cards are committed, but the
+        # play order is always strongest-first: in Codenames a wrong guess
+        # ends the turn, so leading with the lower-confidence picks (which
+        # softmax order can produce) is strictly worse than playing the most
+        # confident card first.
+        committed: list[CandidateGuess] = []
+        bonus_attempted = False
+        stop_reason = "reached_n"
+
+        # Always commit pick #1 (declining outright is a wasted turn).
         first_rank = self._next_rank(ranked)
-        guesses.append(self._commit(ranked, first_rank, is_bonus=False))
+        committed.append(self._commit(ranked, first_rank, is_bonus=False))
 
         # Picks 2..N — gate on the (potentially blended) `score`, not the raw
         # cosine similarity, so an LLM rerank can lower a card's effective
@@ -173,23 +181,39 @@ class AIGuesser(Guesser):
             next_rank = self._next_rank(ranked)
             cand = ranked[next_rank]
             if cand.score < policy.confidence_floor:
-                return guesses, False, "confidence_floor"
-            guesses.append(self._commit(ranked, next_rank, is_bonus=False))
+                stop_reason = "confidence_floor"
+                return self._sorted_play_order(committed), False, stop_reason
+            committed.append(self._commit(ranked, next_rank, is_bonus=False))
 
-        if len(guesses) < n:
-            return guesses, False, "no_more_candidates"
+        if len(committed) < n:
+            return self._sorted_play_order(committed), False, "no_more_candidates"
 
-        # Bonus N+1 attempt
+        # Bonus N+1 attempt — gap is measured against the *lowest-score* card
+        # already committed (under sampling, that is not necessarily the most
+        # recently appended one).
         if n < len(ranked):
-            nth_score = guesses[-1].score
+            nth_score = min(c.score for c in committed)
             next_rank = self._next_rank(ranked)
             bonus_cand = ranked[next_rank]
             gap = nth_score - bonus_cand.score
             if gap < policy.bonus_gap_threshold:
-                guesses.append(self._commit(ranked, next_rank, is_bonus=True))
-                return guesses, True, "reached_n_plus_bonus"
+                committed.append(self._commit(ranked, next_rank, is_bonus=True))
+                bonus_attempted = True
+                stop_reason = "reached_n_plus_bonus"
 
-        return guesses, False, "reached_n"
+        return self._sorted_play_order(committed), bonus_attempted, stop_reason
+
+    @staticmethod
+    def _sorted_play_order(
+        committed: list[CandidateGuess],
+    ) -> list[CandidateGuess]:
+        """Order committed picks by `score` descending — strongest first.
+
+        Stable on ties (preserves the sampling/commit order of equal-scored
+        picks) so deterministic configurations keep their existing trace
+        ordering bit-for-bit.
+        """
+        return sorted(committed, key=lambda c: c.score, reverse=True)
 
     def _next_rank(self, ranked: list[CandidateGuess]) -> int:
         available = [c for c in ranked if not c.committed]

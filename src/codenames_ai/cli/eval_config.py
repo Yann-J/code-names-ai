@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Literal
 
 import yaml
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -88,9 +87,69 @@ class VocabularyConfig(BaseModel):
     clue: ClueVocabularySideConfig = Field(default_factory=ClueVocabularySideConfig)
 
 
+class LLMGuesserConfig(BaseModel):
+    """LLM-primary guesser policy knobs (issue #3).
+
+    Active only when ``guesser.mode == "llm_primary"``. Tuning happens here
+    instead of in code so experiments do not require editing Python.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lambda_danger: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=10.0,
+        description="Combined score weight: combined = fit − λ·danger (fixed for v1).",
+    )
+    min_combined: float = Field(
+        default=0.0,
+        ge=-1.0,
+        le=1.0,
+        description="Continue gate: top combined score must be ≥ this to keep guessing.",
+    )
+    min_margin_to_second: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Continue gate: gap to runner-up combined score must be ≥ this.",
+    )
+    min_fit: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Continue gate: top raw fit must be ≥ this (assassin sanity floor).",
+    )
+    schema_mode: bool = Field(
+        default=True,
+        description="Try response_format=json_schema first (provider-dependent); else prompt-only JSON.",
+    )
+    retry_count: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Re-issue parse-failed calls this many times before falling back (PRD: fixed at 1 for v1).",
+    )
+    keep_raw_response: bool = Field(
+        default=False,
+        description="Keep raw LLM payloads in traces for debugging (heavy; off by default).",
+    )
+    embedding_fallback: bool = Field(
+        default=True,
+        description="On LLM failure, try deterministic embedding cosine argmax before uniform.",
+    )
+
+
 class GuesserConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    mode: Literal["embedding", "llm_primary"] = Field(
+        default="embedding",
+        description=(
+            "embedding: legacy AIGuesser + optional LLM rerank. "
+            "llm_primary: per-physical-guess LLM scoring via LLMGuesser (issue #3)."
+        ),
+    )
     extra_candidates: int = Field(default=3, ge=0, le=50)
     sampling_temperature: float = Field(
         default=0.0,
@@ -104,6 +163,7 @@ class GuesserConfig(BaseModel):
         le=25,
         description="Sample only from top-K ranked candidates (0 means all unrevealed cards).",
     )
+    llm: LLMGuesserConfig = Field(default_factory=LLMGuesserConfig)
 
 
 class ScoringConfig(BaseModel):

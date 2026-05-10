@@ -1,0 +1,24 @@
+# LLM-primary guesser (issue #3): one LLM call per physical guess, deterministic
+# combine + two-layer continue gate. Spymaster path stays embedding-first with LLM rerank.
+extends: base.yaml
+
+label: llm_guesser
+
+guesser:
+  mode: llm_primary
+  llm:
+    lambda_danger: 0.5
+    # Conservative gates — accept the model's continue only when next-best score
+    # and margin are visibly above zero.
+    min_combined: 0.15
+    min_margin_to_second: 0.05
+    min_fit: 0.20
+    schema_mode: true
+    retry_count: 1
+    keep_raw_response: false
+    embedding_fallback: true
+
+# LLM-primary guesser owns its own confidence semantics; the dynamic-risk wrapper
+# only modulates the embedding StopPolicy and is bypassed for llm_primary.
+dynamic_risk:
+  enabled: false

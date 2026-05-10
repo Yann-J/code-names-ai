@@ -3,7 +3,12 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
-from codenames_ai.agent.interfaces import Guesser, NoLegalClueError, Spymaster
+from codenames_ai.agent.interfaces import (
+    Guesser,
+    NoLegalClueError,
+    RevealOutcome,
+    Spymaster,
+)
 from codenames_ai.agent.trace import GuesserTrace, SpymasterTrace
 from codenames_ai.game.models import Board, Clue, Color, GuesserView, SpymasterView
 from codenames_ai.game.state import (
@@ -138,52 +143,84 @@ class Game:
 
         guesser: Guesser = self._players[(team, "guesser")]  # type: ignore[assignment]
         view = GuesserView(board=self.state.board, team=team)
-        trace = guesser.guess(view, clue)
+        history = self.state.turn_history
+
+        def _reveal(word: str) -> RevealOutcome:
+            return self._reveal_one(team, word)
+
+        trace = guesser.play_turn(view, clue, history, reveal=_reveal)
         self.guesser_traces.append(trace)
-
-        ar = self.state.guesser_attempts_remaining
-        for guess_word in trace.guesses:
-            try:
-                new_board = reveal_card(self.state.board, guess_word)
-            except ValueError:
-                # Guesser proposed an already-revealed or unknown card.
-                # Treat as turn-ending error.
-                logger.warning(
-                    "guesser %s proposed invalid card %r; ending turn",
-                    team.value,
-                    guess_word,
-                )
-                break
-            revealed_card = next(c for c in new_board.cards if c.word == guess_word)
-            outcome_color = revealed_card.color
-            event = TurnEvent(
-                team=team,
-                kind="GUESS",
-                guess=guess_word,
-                outcome_color=outcome_color,
-            )
-            next_ar = ar - 1 if ar is not None else None
-            self.state = replace(
-                self.state,
-                board=new_board,
-                turn_history=self.state.turn_history + (event,),
-                guesser_attempts_remaining=next_ar,
-            )
-            ar = next_ar
-
-            winner = check_win(self.state)
-            if winner is not None:
-                self._end(winner=winner)
-                return
-            if outcome_color != team:
-                # Wrong color — turn ends regardless of remaining picks.
-                break
-            if ar is not None and ar <= 0:
-                # Used all guesses allowed for this clue.
-                break
 
         if not self.state.is_over:
             self._switch_team()
+
+    def _reveal_one(self, team: Color, guess_word: str) -> RevealOutcome:
+        """Reveal one card during a guesser turn; mutate state and report outcome.
+
+        Returns a ``RevealOutcome`` with the post-reveal ``GuesserView`` (or
+        ``None`` if the turn or game ended) so iterative guessers can re-score
+        with up-to-date board state.
+        """
+        ar = self.state.guesser_attempts_remaining
+        try:
+            new_board = reveal_card(self.state.board, guess_word)
+        except ValueError:
+            logger.warning(
+                "guesser %s proposed invalid card %r; ending turn",
+                team.value,
+                guess_word,
+            )
+            return RevealOutcome(
+                view=None,
+                turn_ended=True,
+                outcome_color=Color.NEUTRAL,
+                game_over=False,
+            )
+        revealed_card = next(c for c in new_board.cards if c.word == guess_word)
+        outcome_color = revealed_card.color
+        event = TurnEvent(
+            team=team,
+            kind="GUESS",
+            guess=guess_word,
+            outcome_color=outcome_color,
+        )
+        next_ar = ar - 1 if ar is not None else None
+        self.state = replace(
+            self.state,
+            board=new_board,
+            turn_history=self.state.turn_history + (event,),
+            guesser_attempts_remaining=next_ar,
+        )
+
+        winner = check_win(self.state)
+        if winner is not None:
+            self._end(winner=winner)
+            return RevealOutcome(
+                view=None,
+                turn_ended=True,
+                outcome_color=outcome_color,
+                game_over=True,
+            )
+        if outcome_color != team:
+            return RevealOutcome(
+                view=None,
+                turn_ended=True,
+                outcome_color=outcome_color,
+                game_over=False,
+            )
+        if next_ar is not None and next_ar <= 0:
+            return RevealOutcome(
+                view=None,
+                turn_ended=True,
+                outcome_color=outcome_color,
+                game_over=False,
+            )
+        return RevealOutcome(
+            view=GuesserView(board=self.state.board, team=team),
+            turn_ended=False,
+            outcome_color=outcome_color,
+            game_over=False,
+        )
 
     def apply_human_guess(self, word: str) -> None:
         """Reveal one card during a human guesser's turn (one HTTP action per guess)."""

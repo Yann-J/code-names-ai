@@ -307,7 +307,10 @@ class TestTraceShape:
 
 
 class TestSampling:
-    def test_sampling_can_pick_non_top_candidate(self):
+    def test_sampling_can_commit_non_top_candidate(self):
+        # Cautious risk disables the bonus pick (so the sampler decides the
+        # only committed card). Without sampling, greedy would always pick
+        # 'a'; the seeded RNG draw lands on 'b'.
         matrix = _padded_matrix(
             [
                 ("clue", [1.0, 0.0, 0.0]),
@@ -325,11 +328,45 @@ class TestSampling:
         )
         guesser = AIGuesser(
             matrix,
-            risk=1.0,
+            risk=0.0,  # cautious → no bonus pick, isolates the sampler effect
             sampling_temperature=1.0,
             sampling_top_k=2,
             rng=np.random.default_rng(0),
         )
         trace = guesser.guess(GuesserView(board=board, team=Color.RED), Clue("clue", 1))
-        assert trace.guesses[0] in {"a", "b"}
-        assert trace.guesses[0] == "b"
+        assert trace.guesses == ("b",)
+
+    def test_play_order_is_score_descending_even_under_sampling(self):
+        # With aggressive risk every commit fires (bonus included) and sampling
+        # can choose them in any order. Play order must always lead with the
+        # highest-score card so the engine spends its strongest pick first.
+        matrix = _padded_matrix(
+            [
+                ("clue", [1.0, 0.0, 0.0]),
+                ("hi", [1.0, 0.0, 0.0]),
+                ("mid", [0.95, 0.05, 0.0]),
+                ("lo", [0.85, 0.15, 0.0]),
+            ]
+        )
+        board = make_board(
+            [
+                ("hi", Color.RED, False),
+                ("mid", Color.RED, False),
+                ("lo", Color.RED, False),
+            ]
+        )
+        guesser = AIGuesser(
+            matrix,
+            risk=1.0,
+            sampling_temperature=2.0,  # heavy sampling so commit order is shuffled
+            sampling_top_k=0,
+            rng=np.random.default_rng(7),
+        )
+        trace = guesser.guess(GuesserView(board=board, team=Color.RED), Clue("clue", 2))
+        committed_words = trace.guesses
+        # All three should commit (n=2 picks + 1 bonus, aggressive bonus gate).
+        assert set(committed_words) == {"hi", "mid", "lo"}
+        # Play order strictly descending by score (guesses are committed words).
+        committed = {c.word: c for c in trace.candidates if c.committed}
+        scores_in_play_order = [committed[w].score for w in committed_words]
+        assert scores_in_play_order == sorted(scores_in_play_order, reverse=True)

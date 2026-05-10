@@ -68,7 +68,14 @@ top_k_trace: 200
 
 # -- GuesserConfig --
 guesser:
+  # `embedding`: legacy embedding-first guesser with optional LLM rerank shortlist.
+  # `llm_primary`: LLM-primary scoring (issue #3) — one LLM call per physical guess scores
+  # every unrevealed word; engine commits argmax(fit − λ·danger) and uses a two-layer
+  # continue/stop gate. Requires LLM credentials.
+  mode: embedding
+
   # Board candidates shown to the guesser LLM beyond the clue count N (ranking context).
+  # Used by the embedding-mode rerank shortlist; ignored in llm_primary mode.
   extra_candidates: 3
 
   # Stochastic guess selection: 0 = always pick the top-ranked card; >0 applies softmax
@@ -77,6 +84,29 @@ guesser:
 
   # With stochastic guesses, sample only from this many top-ranked unrevealed cards; 0 = all.
   sampling_top_k: 0
+
+  # LLM-primary policy knobs (active only when `mode: llm_primary`).
+  llm:
+    # combined = fit − λ·danger. Larger λ punishes risky picks more.
+    lambda_danger: 0.5
+
+    # Two-layer continue gate: even if the model says continue, scores must clear these floors.
+    min_combined: 0.0
+    min_margin_to_second: 0.0
+    min_fit: 0.0
+
+    # Try OpenAI-style structured output first; downgrade to prompt-only JSON if needed.
+    schema_mode: true
+
+    # PRD: fixed at one retry on parse failure for v1.
+    retry_count: 1
+
+    # Persist raw LLM payloads in traces (heavy; on only when debugging).
+    keep_raw_response: false
+
+    # On parse failure with full embedding coverage, fall back to deterministic cosine argmax
+    # before resorting to a uniform random pick.
+    embedding_fallback: true
 
 # -- ScoringConfig (resolved for risk = 0.5 via ScoringWeights.from_risk) --
 scoring:

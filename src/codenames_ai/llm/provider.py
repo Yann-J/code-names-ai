@@ -38,8 +38,16 @@ class LLMProvider(ABC):
         messages: list[ChatMessage] | list[dict[str, str]],
         *,
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
-        """Send a list of role-tagged messages and return the assistant text."""
+        """Send a list of role-tagged messages and return the assistant text.
+
+        ``json_mode`` triggers prompt-only JSON output (``response_format =
+        {"type": "json_object"}``). ``json_schema``, when provided, requests
+        provider-side structured output keyed by the supplied JSON Schema
+        (OpenAI Structured Outputs); concrete providers may downgrade to
+        ``json_mode`` if the underlying API does not support it.
+        """
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -83,10 +91,14 @@ class OpenAICompatibleProvider(LLMProvider):
         messages: list[ChatMessage] | list[dict[str, str]],
         *,
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
     ) -> str:
         msgs = [
             m.to_dict() if isinstance(m, ChatMessage) else dict(m) for m in messages
         ]
+        # Cache key folds in schema usage so a schema-mode response is not served
+        # to a later prompt-only-mode caller (and vice versa).
+        cache_json_mode = bool(json_mode) or json_schema is not None
 
         if self.cache is not None:
             cached = self.cache.get(
@@ -94,7 +106,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 model=self.model,
                 base_url=self.base_url,
                 temperature=self.temperature,
-                json_mode=json_mode,
+                json_mode=cache_json_mode,
             )
             if cached is not None:
                 return cached
@@ -104,7 +116,12 @@ class OpenAICompatibleProvider(LLMProvider):
             "messages": msgs,
             "temperature": self.temperature,
         }
-        if json_mode:
+        if json_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": json_schema,
+            }
+        elif json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
         logger.debug("LLM request: model=%s base_url=%s", self.model, self.base_url)
@@ -117,7 +134,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 model=self.model,
                 base_url=self.base_url,
                 temperature=self.temperature,
-                json_mode=json_mode,
+                json_mode=cache_json_mode,
                 response=text,
             )
         return text
