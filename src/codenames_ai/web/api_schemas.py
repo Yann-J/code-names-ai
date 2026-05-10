@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from codenames_ai.agent.trace import Candidate, SpymasterTrace
-from codenames_ai.game.models import Card, Color
+from codenames_ai.agent.trace import Candidate, GuesserTrace, SpymasterTrace
+from codenames_ai.game.models import Card, Clue, Color
 from codenames_ai.game.state import TurnPhase
 from codenames_ai.web.play_session import PlaySession
 
@@ -84,6 +84,10 @@ class GameSnapshot(BaseModel):
     live_mutation_seq: int = Field(
         default=0,
         description="Monotonic counter bumped on live room broadcasts; helps host UI prefer fresh WS over stale REST.",
+    )
+    last_ai_analysis: LastAiSpymasterPayload | LastAiGuesserPayload | None = Field(
+        default=None,
+        description="When ``include_secret_colors`` is true: most recent AI spymaster or guesser decision.",
     )
 
 
@@ -223,6 +227,23 @@ def build_game_snapshot(
         else:
             win_reason = "all_words"
 
+    last_ai: LastAiSpymasterPayload | LastAiGuesserPayload | None = None
+    if include_secret_colors:
+        if sess.last_ai_guesser is not None:
+            t_team, t_clue, t_tr = sess.last_ai_guesser
+            last_ai = LastAiGuesserPayload(
+                kind="guesser",
+                team=t_team.value,
+                trace=guesser_trace_to_payload(t_tr, t_clue),
+            )
+        elif sess.last_ai_spymaster is not None:
+            t_team, t_tr = sess.last_ai_spymaster
+            last_ai = LastAiSpymasterPayload(
+                kind="spymaster",
+                team=t_team.value,
+                trace=spymaster_trace_to_payload(t_tr),
+            )
+
     return GameSnapshot(
         id=sess.id,
         seed=st.rng_seed,
@@ -248,6 +269,7 @@ def build_game_snapshot(
         ),
         guess_flash=flash_model,
         live_mutation_seq=sess.live_mutation_seq,
+        last_ai_analysis=last_ai,
     )
 
 
@@ -296,6 +318,46 @@ class SpymasterTracePayload(BaseModel):
     veto_count: int
     illegal_count: int
     risk_snapshot: RiskSnapshotPayload | None = None
+
+
+class StopPolicyPayload(BaseModel):
+    confidence_floor: float
+    bonus_gap_threshold: float
+    risk: float
+
+
+class CandidateGuessPayload(BaseModel):
+    word: str
+    similarity: float
+    score: float
+    rank: int
+    committed: bool
+    is_bonus: bool
+    llm_score: float | None = None
+    llm_reason: str | None = None
+
+
+class GuesserTracePayload(BaseModel):
+    clue_word: str
+    clue_count: int
+    candidates: list[CandidateGuessPayload]
+    guesses: list[str]
+    stop_policy: StopPolicyPayload
+    bonus_attempted: bool
+    stop_reason: str
+    risk_snapshot: RiskSnapshotPayload | None = None
+
+
+class LastAiSpymasterPayload(BaseModel):
+    kind: Literal["spymaster"] = "spymaster"
+    team: str
+    trace: SpymasterTracePayload
+
+
+class LastAiGuesserPayload(BaseModel):
+    kind: Literal["guesser"] = "guesser"
+    team: str
+    trace: GuesserTracePayload
 
 
 class AnalysisBoardCard(BaseModel):
@@ -357,5 +419,46 @@ def spymaster_trace_to_payload(trace: SpymasterTrace) -> SpymasterTracePayload:
         top_candidates=[cand(x) for x in trace.top_candidates],
         veto_count=trace.veto_count,
         illegal_count=trace.illegal_count,
+        risk_snapshot=rs_payload,
+    )
+
+
+def guesser_trace_to_payload(trace: GuesserTrace, clue: Clue) -> GuesserTracePayload:
+    rs_payload: RiskSnapshotPayload | None = None
+    if trace.risk_snapshot is not None:
+        rs = trace.risk_snapshot
+        rs_payload = RiskSnapshotPayload(
+            base_risk=rs.base_risk,
+            effective_risk=rs.effective_risk,
+            delta_objectives=rs.delta_objectives,
+            ours_unrevealed=rs.ours_unrevealed,
+            theirs_unrevealed=rs.theirs_unrevealed,
+            dynamic_enabled=rs.dynamic_enabled,
+        )
+    sp = trace.stop_policy
+    return GuesserTracePayload(
+        clue_word=clue.word,
+        clue_count=clue.count,
+        candidates=[
+            CandidateGuessPayload(
+                word=c.word,
+                similarity=c.similarity,
+                score=c.score,
+                rank=c.rank,
+                committed=c.committed,
+                is_bonus=c.is_bonus,
+                llm_score=c.llm_score,
+                llm_reason=c.llm_reason,
+            )
+            for c in trace.candidates
+        ],
+        guesses=list(trace.guesses),
+        stop_policy=StopPolicyPayload(
+            confidence_floor=sp.confidence_floor,
+            bonus_gap_threshold=sp.bonus_gap_threshold,
+            risk=sp.risk,
+        ),
+        bonus_attempted=trace.bonus_attempted,
+        stop_reason=trace.stop_reason,
         risk_snapshot=rs_payload,
     )

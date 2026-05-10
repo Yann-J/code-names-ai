@@ -36,6 +36,35 @@ export interface GuessFlash {
   word: string
 }
 
+export interface GuesserTracePayload {
+  clue_word: string
+  clue_count: number
+  candidates: Array<{
+    word: string
+    similarity: number
+    score: number
+    rank: number
+    committed: boolean
+    is_bonus: boolean
+    llm_score: number | null
+    llm_reason: string | null
+  }>
+  guesses: string[]
+  stop_policy: {
+    confidence_floor: number
+    bonus_gap_threshold: number
+    risk: number
+  }
+  bonus_attempted: boolean
+  stop_reason: string
+  risk_snapshot?: RiskSnapshotPayload | null
+}
+
+/** Present when the server built the snapshot with spymaster overlay (captain view). */
+export type LastAiAnalysis =
+  | { kind: 'spymaster'; team: string; trace: AnalysisTracePayload }
+  | { kind: 'guesser'; team: string; trace: GuesserTracePayload }
+
 export interface GameSnapshot {
   id: string
   seed: number
@@ -57,6 +86,8 @@ export interface GameSnapshot {
   guess_flash: GuessFlash | null
   /** Bumped on server live broadcasts; used to merge host REST vs WS when history/reveal counts tie. */
   live_mutation_seq?: number
+  /** Latest AI spymaster or guesser trace when snapshot was built with secret colors (captain view). */
+  last_ai_analysis?: LastAiAnalysis | null
 }
 
 export interface CreateGameBody {

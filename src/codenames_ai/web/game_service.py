@@ -3,7 +3,7 @@ from __future__ import annotations
 from codenames_ai.cli.runtime import EvalRuntime
 from codenames_ai.game.board import generate_board
 from codenames_ai.game.human import HumanGuesser, HumanSpymaster
-from codenames_ai.game.models import Card, Color
+from codenames_ai.game.models import Card, Clue, Color
 from codenames_ai.game.orchestrator import Game
 from codenames_ai.game.rules import is_legal_clue
 from codenames_ai.game.state import TurnEvent, TurnPhase, prior_clue_surfaces_lower
@@ -104,6 +104,8 @@ def new_play_session(
 def rematch_play_session(sess: PlaySession, rt: EvalRuntime, new_seed: int) -> None:
     sess.humans.clear()
     sess.ui_guess_flash = None
+    sess.last_ai_spymaster = None
+    sess.last_ai_guesser = None
     rs, rg, bs, bg = make_players(rt, sess.roles, sess.humans)
     board = generate_board(rt.game_vocab, seed=new_seed)
     sess.game = Game(
@@ -154,7 +156,23 @@ def advance_ai(sess: PlaySession) -> None:
         kind = "spymaster" if phase == TurnPhase.SPYMASTER else "guesser"
         if sess.roles[team][kind] == "human":
             return
+        clue_before: Clue | None = None
+        if kind == "guesser":
+            clue_before = g.state.latest_clue()
+        n_spy_traces = len(g.spymaster_traces)
+        n_guess_traces = len(g.guesser_traces)
         g.step()
+        if kind == "spymaster" and len(g.spymaster_traces) > n_spy_traces:
+            sess.last_ai_spymaster = (team, g.spymaster_traces[-1])
+            sess.last_ai_guesser = None
+        elif (
+            kind == "guesser"
+            and len(g.guesser_traces) > n_guess_traces
+            and clue_before is not None
+            and not clue_before.is_pass()
+        ):
+            sess.last_ai_guesser = (team, clue_before, g.guesser_traces[-1])
+            sess.last_ai_spymaster = None
 
 
 def apply_human_guess_words(sess: PlaySession, guesses: list[str]) -> GuessFlashDict | None:

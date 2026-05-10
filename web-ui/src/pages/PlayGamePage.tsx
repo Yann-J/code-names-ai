@@ -77,6 +77,10 @@ function teamSide(team: string): 'red' | 'blue' {
   return team.toUpperCase() === 'BLUE' ? 'blue' : 'red'
 }
 
+function teamRoles(snapshot: api.GameSnapshot, team: string): api.TeamRoles {
+  return teamSide(team) === 'blue' ? snapshot.roles.blue : snapshot.roles.red
+}
+
 interface TeamScore {
   side: 'red' | 'blue'
   revealed: number
@@ -185,6 +189,14 @@ function connectLiveRoleWs(
 
 const BOOTSTRAP_ICONS = 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons'
 
+function selectNodeText(el: HTMLElement) {
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
 function RemoteLinksModal({
   open,
   onClose,
@@ -199,6 +211,28 @@ function RemoteLinksModal({
   const [live, setLive] = useState<api.CreateLiveRoomResponse | null>(null)
   const [sharing, setSharing] = useState(false)
   const [shareErr, setShareErr] = useState<string | null>(null)
+  const [copiedWhich, setCopiedWhich] = useState<'guesser' | 'spymaster' | null>(null)
+  const copyFeedbackTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      if (copyFeedbackTimeoutRef.current) {
+        window.clearTimeout(copyFeedbackTimeoutRef.current)
+        copyFeedbackTimeoutRef.current = null
+      }
+      return
+    }
+    queueMicrotask(() => {
+      setCopiedWhich(null)
+    })
+  }, [open])
+
+  useEffect(
+    () => () => {
+      if (copyFeedbackTimeoutRef.current) window.clearTimeout(copyFeedbackTimeoutRef.current)
+    },
+    [],
+  )
 
   async function refresh() {
     setSharing(true)
@@ -214,9 +248,19 @@ function RemoteLinksModal({
     }
   }
 
-  async function copyLine(text: string | null) {
+  async function copyLine(which: 'guesser' | 'spymaster', text: string | null) {
     if (!text) return
-    await navigator.clipboard.writeText(text)
+    try {
+      await navigator.clipboard.writeText(text)
+      if (copyFeedbackTimeoutRef.current) window.clearTimeout(copyFeedbackTimeoutRef.current)
+      setCopiedWhich(which)
+      copyFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setCopiedWhich(null)
+        copyFeedbackTimeoutRef.current = null
+      }, 1800)
+    } catch {
+      /* clipboard denied or unavailable */
+    }
   }
 
   if (!open) return null
@@ -233,7 +277,7 @@ function RemoteLinksModal({
             ×
           </button>
         </div>
-        <p className="muted remote-links-modal-intro">Same session as this tab · paste into chat · links stay stable until the room expires from idle.</p>
+        <p className="muted remote-links-modal-intro">Play this game with remote human players. You can share either a spymaster link or a guesser link</p>
         <div className="remote-links-modal-actions">
           <button type="button" className="btn-secondary" disabled={sharing} onClick={() => refresh()}>
             {live ? 'Refresh links' : 'Generate links'}
@@ -244,17 +288,23 @@ function RemoteLinksModal({
           <ul className="remote-links-list muted">
             {live.guesser_url ? (
               <li>
-                Operative (team):{' '}
-                <code className="remote-url">{live.guesser_url}</code>{' '}
+                Guesser:{' '}
+                <code
+                  className="remote-url"
+                  title="Click to select"
+                  onClick={(e) => selectNodeText(e.currentTarget)}
+                >
+                  {live.guesser_url}
+                </code>{' '}
                 <button
                   type="button"
-                  className="btn-copy-url"
-                  onClick={() => copyLine(live.guesser_url)}
+                  className={`btn-copy-url${copiedWhich === 'guesser' ? ' btn-copy-url--copied' : ''}`}
+                  onClick={() => copyLine('guesser', live.guesser_url)}
                   title="Copy link"
                   aria-label="Copy operative link"
                 >
                   <img
-                    src={`${BOOTSTRAP_ICONS}/clipboard.svg`}
+                    src={`${BOOTSTRAP_ICONS}/${copiedWhich === 'guesser' ? 'check-lg.svg' : 'clipboard.svg'}`}
                     className="btn-copy-url-icon"
                     alt=""
                     aria-hidden
@@ -262,21 +312,27 @@ function RemoteLinksModal({
                 </button>
               </li>
             ) : (
-              <li>No operative link — add a human guesser to enable it.</li>
+              <li>No guesser link — add a human guesser to enable it.</li>
             )}
             {live.spymaster_url ? (
               <li>
-                Captain (private):{' '}
-                <code className="remote-url">{live.spymaster_url}</code>{' '}
+                Spymaster:{' '}
+                <code
+                  className="remote-url"
+                  title="Click to select"
+                  onClick={(e) => selectNodeText(e.currentTarget)}
+                >
+                  {live.spymaster_url}
+                </code>{' '}
                 <button
                   type="button"
-                  className="btn-copy-url"
-                  onClick={() => copyLine(live.spymaster_url)}
+                  className={`btn-copy-url${copiedWhich === 'spymaster' ? ' btn-copy-url--copied' : ''}`}
+                  onClick={() => copyLine('spymaster', live.spymaster_url)}
                   title="Copy link"
                   aria-label="Copy captain link"
                 >
                   <img
-                    src={`${BOOTSTRAP_ICONS}/clipboard.svg`}
+                    src={`${BOOTSTRAP_ICONS}/${copiedWhich === 'spymaster' ? 'check-lg.svg' : 'clipboard.svg'}`}
                     className="btn-copy-url-icon"
                     alt=""
                     aria-hidden
@@ -284,12 +340,129 @@ function RemoteLinksModal({
                 </button>
               </li>
             ) : (
-              <li>No captain link — add a human spymaster to enable it.</li>
+              <li>No spymaster link — add a human spymaster to enable it.</li>
             )}
           </ul>
         ) : null}
       </div>
     </div>
+  )
+}
+
+function LastAiSpymasterBody({ trace }: { trace: api.AnalysisTracePayload }) {
+  return (
+    <>
+      {trace.risk_snapshot != null ? (
+        <p className="muted last-ai-modal__risk">
+          {trace.risk_snapshot.dynamic_enabled ? 'Dynamic risk' : 'Risk context'}: base{' '}
+          {trace.risk_snapshot.base_risk.toFixed(2)} → effective {trace.risk_snapshot.effective_risk.toFixed(2)} (Δ
+          objectives {trace.risk_snapshot.delta_objectives >= 0 ? '+' : ''}
+          {trace.risk_snapshot.delta_objectives.toFixed(0)}: ours {trace.risk_snapshot.ours_unrevealed}, theirs{' '}
+          {trace.risk_snapshot.theirs_unrevealed})
+        </p>
+      ) : null}
+      <h3 className="last-ai-modal__h3">Chosen</h3>
+      {trace.chosen ? (
+        <p>
+          <strong>{trace.chosen.clue}</strong> (N={trace.chosen.n}) targets: {trace.chosen.targets.join(', ')}
+        </p>
+      ) : (
+        <p>No legal clue (passed).</p>
+      )}
+      <h3 className="last-ai-modal__h3">Top candidates</h3>
+      <div className="table-scroll">
+        <table className="analysis-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>clue</th>
+              <th>N</th>
+              <th>target words</th>
+              <th>final score</th>
+              <th>exp. reward</th>
+              <th>margin</th>
+              <th>embedding</th>
+              <th>LLM</th>
+              <th>reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trace.top_candidates.map((c, i) => (
+              <tr key={i}>
+                <td>{i + 1}</td>
+                <td>{c.clue}</td>
+                <td>{c.n}</td>
+                <td>{c.targets.length > 0 ? c.targets.join(', ') : '—'}</td>
+                <td>{c.score.toFixed(3)}</td>
+                <td>{c.components.expected_reward_raw.toFixed(3)}</td>
+                <td>{c.margin.toFixed(3)}</td>
+                <td>{c.embedding_score.toFixed(3)}</td>
+                <td>{c.llm_score != null ? c.llm_score.toFixed(3) : '—'}</td>
+                <td>{c.llm_reason ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+function LastAiGuesserBody({ trace }: { trace: api.GuesserTracePayload }) {
+  const { stop_policy: sp } = trace
+  return (
+    <>
+      <p className="last-ai-modal__clue-line">
+        Clue <strong>{trace.clue_word}</strong> (N={trace.clue_count}) · picks:{' '}
+        <strong>{trace.guesses.length > 0 ? trace.guesses.join(', ') : '—'}</strong>
+      </p>
+      <p className="muted">
+        Stop: {trace.stop_reason}
+        {trace.bonus_attempted ? ' · bonus pick considered' : ''}
+      </p>
+      {trace.risk_snapshot != null ? (
+        <p className="muted last-ai-modal__risk">
+          {trace.risk_snapshot.dynamic_enabled ? 'Dynamic risk' : 'Risk context'}: base{' '}
+          {trace.risk_snapshot.base_risk.toFixed(2)} → effective {trace.risk_snapshot.effective_risk.toFixed(2)}
+        </p>
+      ) : null}
+      <h3 className="last-ai-modal__h3">Stop policy</h3>
+      <p className="muted last-ai-modal__policy">
+        confidence floor {sp.confidence_floor.toFixed(2)}, bonus gap threshold {sp.bonus_gap_threshold.toFixed(2)},
+        risk knob {sp.risk.toFixed(2)}
+      </p>
+      <h3 className="last-ai-modal__h3">Scored cards</h3>
+      <div className="table-scroll">
+        <table className="analysis-table">
+          <thead>
+            <tr>
+              <th>rank</th>
+              <th>word</th>
+              <th>similarity</th>
+              <th>score</th>
+              <th>picked</th>
+              <th>bonus</th>
+              <th>LLM</th>
+              <th>reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trace.candidates.map((c) => (
+              <tr key={c.word} className={c.committed ? 'last-ai-modal__row--committed' : undefined}>
+                <td>{c.rank + 1}</td>
+                <td>{c.word}</td>
+                <td>{c.similarity.toFixed(3)}</td>
+                <td>{c.score.toFixed(3)}</td>
+                <td>{c.committed ? 'yes' : ''}</td>
+                <td>{c.is_bonus ? 'yes' : ''}</td>
+                <td>{c.llm_score != null ? c.llm_score.toFixed(3) : '—'}</td>
+                <td>{c.llm_reason ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
@@ -307,6 +480,7 @@ export function PlayGamePage() {
   const [liveGuessSnap, setLiveGuessSnap] = useState<api.GameSnapshot | null>(null)
   const [liveSpySnap, setLiveSpySnap] = useState<api.GameSnapshot | null>(null)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
+  const [lastAiModalOpen, setLastAiModalOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [clueWord, setClueWord] = useState('')
@@ -314,11 +488,18 @@ export function PlayGamePage() {
   const [dismissedEndModalFor, setDismissedEndModalFor] = useState<string | null>(null)
   /** Remote captain link only: show key-card tint on unrevealed words; off = same board as operatives see. */
   const [remoteCaptainKeyView, setRemoteCaptainKeyView] = useState(true)
+  /** Defer card transform transitions until after mount so already-revealed cells do not animate. */
+  const [boardMotionReady, setBoardMotionReady] = useState(false)
 
   const pollStateRef = useRef(state)
   useEffect(() => {
     pollStateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setBoardMotionReady(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   const prevPhaseSyncRef = useRef<string | null>(null)
 
@@ -357,11 +538,22 @@ export function PlayGamePage() {
 
   useEffect(() => {
     const ph = state?.current_phase
-    if (isRemote || ph == null) return
+    if (isRemote || ph == null || !state) return
     if (prevPhaseSyncRef.current === ph) return
     prevPhaseSyncRef.current = ph
-    setSpyCaptainView(ph === 'SPYMASTER')
-  }, [isRemote, state?.current_phase])
+    const snap = state
+    queueMicrotask(() => {
+      if (ph === 'SPYMASTER') {
+        const spymaster = teamRoles(snap, snap.current_team).spymaster
+        if (spymaster === 'human') setSpyCaptainView(true)
+      } else if (ph === 'GUESSER') {
+        const guesser = teamRoles(snap, snap.current_team).guesser
+        if (guesser === 'human') setSpyCaptainView(false)
+      } else {
+        setSpyCaptainView(false)
+      }
+    })
+  }, [isRemote, state])
 
   const displayState = useMemo((): api.GameSnapshot | null => {
     if (!state) return null
@@ -523,6 +715,19 @@ export function PlayGamePage() {
       window.clearTimeout(t)
     }
   }, [isRemote, gameId, spyCaptainView, state])
+
+  /** Captain overlay needs REST ``include_secret_colors`` (and ``last_ai_analysis``); operative loads may omit both. */
+  useEffect(() => {
+    if (isRemote || !gameId || !spyCaptainView) return
+    let cancelled = false
+    void api.getGame(gameId, { includeSecretColors: true }).then((full) => {
+      if (cancelled) return
+      setState((prev) => (prev ? fresherSyncedSurface(full, prev) : full))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isRemote, gameId, spyCaptainView])
 
   const historyRounds = useMemo(
     () => buildHistoryRounds(displayState?.turn_history ?? []),
@@ -759,7 +964,6 @@ export function PlayGamePage() {
               />
               Reveal Cards
             </label>
-            <span className="muted status-line spy-phase-hint">Switches automatically each phase · toggle to peek.</span>
           </>
         )}
         <span className="status-line">
@@ -854,7 +1058,7 @@ export function PlayGamePage() {
       </div>
 
       <div className="board-outer">
-        <div className="board-wrap">
+        <div className={`board-wrap${boardMotionReady ? ' board-wrap--motion' : ''}`}>
           {displayState.cards.map((c) => {
             const back = c.revealed && c.revealed_as ? colorClass(c.revealed_as) : colorClass('neutral')
             const sec = secretAttr(c, effectiveSpyOn)
@@ -968,11 +1172,60 @@ export function PlayGamePage() {
             {!isRemote && (guessWsToken || spyWsToken) ? <span> · Live sync enabled for remote players.</span> : null}
           </p>
           <div className="play-footer-links">
+            {!isRemote && spyCaptainView ? (
+              <button
+                type="button"
+                className="play-footer-link-button"
+                disabled={!displayState.last_ai_analysis}
+                title={
+                  displayState.last_ai_analysis
+                    ? 'Open scoring and rationale for the latest AI spymaster or guesser step'
+                    : 'Run a turn with an AI role to capture analysis (captain view with secret colors)'
+                }
+                onClick={() => setLastAiModalOpen(true)}
+              >
+                Last AI move
+              </button>
+            ) : null}
             <Link to={analysisHref}>Analyze this board</Link>
             {displayState.is_over ? <Link to="/play">New game</Link> : null}
           </div>
         </footer>
       )}
+
+      {lastAiModalOpen && displayState.last_ai_analysis ? (
+        <div
+          className="endgame-modal-backdrop"
+          role="presentation"
+          onClick={() => setLastAiModalOpen(false)}
+        >
+          <section
+            className="endgame-modal endgame-modal--wide last-ai-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="last-ai-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="last-ai-modal-title">Last AI move</h2>
+            <p className="muted last-ai-modal__subtitle">
+              <span className={`history-team-tag history-team-tag--${teamSide(displayState.last_ai_analysis.team)}`}>
+                {displayState.last_ai_analysis.team}
+              </span>{' '}
+              {displayState.last_ai_analysis.kind === 'spymaster' ? 'spymaster' : 'guesser'}
+            </p>
+            {displayState.last_ai_analysis.kind === 'spymaster' ? (
+              <LastAiSpymasterBody trace={displayState.last_ai_analysis.trace} />
+            ) : (
+              <LastAiGuesserBody trace={displayState.last_ai_analysis.trace} />
+            )}
+            <div className="endgame-modal__actions">
+              <button type="button" className="btn-secondary" onClick={() => setLastAiModalOpen(false)}>
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {showEndModal ? (
         <div className="endgame-modal-backdrop" role="presentation">

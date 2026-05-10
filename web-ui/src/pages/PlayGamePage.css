@@ -25,6 +25,27 @@
   flex-wrap: wrap;
 }
 
+.play-footer-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.play-footer-link-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.play-footer-link-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 .play-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -177,6 +198,10 @@
   font-size: 0.88rem;
 }
 
+.clue-spymaster-form label + label {
+  margin-inline-start: 0.75rem;
+}
+
 .clue-spymaster-form input[type='text'],
 .clue-spymaster-form input[type='number'] {
   background: var(--surface2);
@@ -261,6 +286,7 @@
   min-width: 0;
   min-height: 0;
   position: relative;
+  perspective: 880px;
 }
 
 .card-inner {
@@ -268,10 +294,31 @@
   inset: 0;
   transform-style: preserve-3d;
   border-radius: var(--radius);
+  transform: rotateY(0deg);
+  transform-origin: center center;
 }
 
 .card-slot.is-revealed .card-inner {
   transform: rotateY(180deg);
+}
+
+.board-wrap--motion .card-inner {
+  transition: transform 0.2s ease-out;
+}
+
+.board-wrap--motion .card-slot.is-revealed .card-inner {
+  transition: transform 0.65s cubic-bezier(0.34, 1.02, 0.32, 1);
+}
+
+.card-slot:not(.is-revealed):has(.card-hit:hover),
+.card-slot:not(.is-revealed):has(.card-hit:focus-visible) {
+  z-index: 2;
+  filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.42));
+}
+
+.card-slot:not(.is-revealed):has(.card-hit:hover) .card-inner,
+.card-slot:not(.is-revealed):has(.card-hit:focus-visible) .card-inner {
+  transform: rotateX(-5deg) rotateY(9deg) translateZ(14px);
 }
 
 .card-face {
@@ -602,6 +649,62 @@
   padding: 1.15rem 1.2rem;
 }
 
+.endgame-modal--wide {
+  width: min(960px, 96vw);
+  max-height: min(88vh, 900px);
+  overflow-y: auto;
+}
+
+.last-ai-modal__h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.last-ai-modal__h3:first-of-type {
+  margin-top: 0.35rem;
+}
+
+.last-ai-modal__subtitle {
+  margin: 0 0 0.75rem;
+}
+
+.last-ai-modal__clue-line {
+  margin: 0 0 0.35rem;
+}
+
+.last-ai-modal__risk,
+.last-ai-modal__policy {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+}
+
+.last-ai-modal .table-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.5rem;
+}
+
+.last-ai-modal .analysis-table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--surface);
+  font-size: 0.82rem;
+}
+
+.last-ai-modal .analysis-table th,
+.last-ai-modal .analysis-table td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+}
+
+.last-ai-modal .analysis-table th {
+  background: var(--surface2);
+}
+
+.last-ai-modal__row--committed {
+  background: rgba(91, 140, 255, 0.12);
+}
+
 .endgame-modal h2 {
   margin: 0 0 0.65rem;
 }
@@ -782,6 +885,20 @@
     animation: none;
     opacity: 0.85;
   }
+
+  .board-wrap .card-inner {
+    transition: none !important;
+  }
+
+  .card-slot:not(.is-revealed):has(.card-hit:hover) .card-inner,
+  .card-slot:not(.is-revealed):has(.card-hit:focus-visible) .card-inner {
+    transform: rotateY(0deg) !important;
+  }
+
+  .card-slot:not(.is-revealed):has(.card-hit:hover),
+  .card-slot:not(.is-revealed):has(.card-hit:focus-visible) {
+    filter: none;
+  }
 }
 
 @keyframes play-busy-pulse {
@@ -910,6 +1027,15 @@
   opacity: 1;
 }
 
+.btn-copy-url--copied {
+  border-color: rgba(110, 220, 140, 0.45);
+  color: rgba(140, 235, 165, 0.95);
+}
+
+.btn-copy-url--copied .btn-copy-url-icon {
+  opacity: 1;
+}
+
 .remote-links-list li {
   margin-bottom: 0.5rem;
 }
@@ -917,6 +1043,7 @@
 .remote-url {
   font-size: 0.76rem;
   word-break: break-all;
+  cursor: pointer;
 }
 
 .remote-role-hint {

@@ -104,7 +104,7 @@ export function PlayNewPage() {
         </div>
 
         <details className="play-new__advanced">
-          <summary>Advanced — seed &amp; AI risk</summary>
+          <summary>Advanced — game ID &amp; risk level</summary>
           <div className="play-new__advanced-inner">
             <label className="play-new__field">
               <span>Board seed</span>

@@ -5,8 +5,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 17, 23, 0.72);
-  backdrop-filter: blur(4px);
+  /* Nearly opaque so bright revealed tiles do not read through during AI waits */
+  background: rgba(10, 12, 18, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .api-spinner-panel {
