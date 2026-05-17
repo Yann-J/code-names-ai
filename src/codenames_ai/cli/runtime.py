@@ -115,6 +115,7 @@ def build_eval_runtime(cfg: EvalAgentConfigFile, app: Config) -> EvalRuntime:
             api_key=key,
             cache=cache,
             temperature=0.0,
+            timeout=float(app.llm_timeout),
         )
 
     spy_reranker = None

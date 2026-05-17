@@ -45,3 +45,7 @@ class Config(BaseSettings):
     llm_model: str | None = Field(default=None, alias="LLM_MODEL")
     llm_api: str | None = Field(default=None, alias="LLM_API")
     llm_key: SecretStr | None = Field(default=None, alias="LLM_KEY")
+    llm_timeout: float = Field(
+        default=300.0,
+        description="Per-request timeout (seconds) for the OpenAI-compatible LLM client.",
+    )
