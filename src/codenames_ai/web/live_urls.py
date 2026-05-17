@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from codenames_ai.web.request_url import public_http_base, public_ws_base
+
 
 def live_room_urls(
     request: Request,
@@ -12,10 +14,8 @@ def live_room_urls(
     include_spy: bool,
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Return ``(guesser_http, spymaster_http, guesser_ws, spymaster_ws)`` omitted when not shareable."""
-    base = str(request.base_url).rstrip("/")
-    scheme = "wss" if request.url.scheme == "https" else "ws"
-    host = request.headers.get("host") or request.url.netloc
-    ws_base = f"{scheme}://{host}"
+    base = public_http_base(request)
+    ws_base = public_ws_base(request)
     g_http = f"{base}/app/remote/guess/{guess_token}" if include_guess else None
     s_http = f"{base}/app/remote/spy/{spy_token}" if include_spy else None
     g_ws = f"{ws_base}/live/ws/guess/{guess_token}" if include_guess else None
