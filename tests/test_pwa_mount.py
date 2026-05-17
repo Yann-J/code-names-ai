@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from codenames_ai.web.app import STATIC_PWA_DIR, create_app
+from codenames_ai.web.pwa_static import STATIC_PWA_DIR
+from codenames_ai.web.app import create_app
 
 
 def test_pwa_index_when_built():

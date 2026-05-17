@@ -184,12 +184,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
         cfg_path = Path(args.config).resolve()
         agent_cfg, _ = load_eval_yaml(cfg_path)
 
-    app = create_app(agent_config=agent_cfg)
+    app = create_app(agent_config=agent_cfg, include_static=not args.no_static)
     uvicorn.run(
         app,
         host=args.host,
         port=args.port,
         log_level=_uvicorn_log_level(resolve_log_level(verbose=args.verbose)),
+        proxy_headers=args.proxy_headers,
+        forwarded_allow_ips=args.forwarded_allow_ips,
     )
     return 0
 
@@ -295,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
     go.add_argument("--top-k", type=int, default=20, dest="top_k")
     go.set_defaults(func=cmd_golden)
 
-    sv = sub.add_parser("serve", help="FastAPI API + React PWA shell")
+    sv = sub.add_parser("serve", help="FastAPI API + React PWA shell (uvicorn)")
     sv.add_argument(
         "--config",
         default=None,
@@ -304,6 +306,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument(
+        "--no-static",
+        action="store_true",
+        help="API/live only (use with nginx or another static front in production)",
+    )
+    sv.add_argument(
+        "--proxy-headers",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Trust X-Forwarded-* from a reverse proxy (default: off)",
+    )
+    sv.add_argument(
+        "--forwarded-allow-ips",
+        default="127.0.0.1",
+        metavar="IPS",
+        help="Comma-separated IPs allowed to set forwarded headers (default: 127.0.0.1)",
+    )
     sv.set_defaults(func=cmd_serve)
 
     ll = sub.add_parser("learn-league", help="Tune spymaster scoring via league self-play")

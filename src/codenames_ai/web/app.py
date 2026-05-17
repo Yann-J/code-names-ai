@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 
 from codenames_ai.cli.eval_config import EvalAgentConfigFile, RiskConfig, ScoringConfig
 from codenames_ai.cli.runtime import EvalRuntime, build_eval_runtime
@@ -12,19 +11,21 @@ from codenames_ai.config import Config
 from codenames_ai.web.api_routes import api_router
 from codenames_ai.web.live_registry import LiveRoomRegistry
 from codenames_ai.web.live_routes import live_router
+from codenames_ai.web.pwa_static import mount_pwa
 from codenames_ai.web.session_store import InMemorySessionStore, SessionStore
-
-STATIC_PWA_DIR = Path(__file__).resolve().parent / "static" / "pwa"
 
 
 def create_app(
     agent_config: EvalAgentConfigFile | None = None,
     session_store: SessionStore | None = None,
     live_registry: LiveRoomRegistry | None = None,
+    *,
+    include_static: bool = True,
 ) -> FastAPI:
-    """Serve API routes and the React PWA shell.
+    """Serve JSON API routes and, optionally, the React PWA shell.
 
-    The legacy HTMX/Jinja UI has been removed.
+    When ``include_static`` is false (production behind nginx), only API and live
+    routes are registered; static assets are served separately.
     """
 
     def cfg_at_risk(risk: float) -> EvalAgentConfigFile:
@@ -57,44 +58,14 @@ def create_app(
             response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
-    if STATIC_PWA_DIR.is_dir():
-        root = STATIC_PWA_DIR.resolve()
-
-        def _pwa_file_or_none(rel: str) -> Path | None:
-            if not rel or rel.startswith("..") or "/.." in rel:
-                return None
-            p = (STATIC_PWA_DIR / rel).resolve()
-            try:
-                p.relative_to(root)
-            except ValueError:
-                return None
-            return p if p.is_file() else None
-
-        def _spa_index() -> FileResponse:
-            # Avoid the browser holding a stale index.html while hashes in the
-            # built bundle change after `npm run build` in web-ui.
-            return FileResponse(
-                STATIC_PWA_DIR / "index.html",
-                headers={"Cache-Control": "no-store, max-age=0"},
-            )
-
-        @app.get("/app")
-        def pwa_index_no_slash():
-            return _spa_index()
+    if include_static and mount_pwa(app):
 
         @app.get("/")
         def root_index():
-            return RedirectResponse(url="/app")
+            return RedirectResponse(url="/app/")
 
-        @app.get("/app/")
-        def pwa_index():
-            return _spa_index()
-
-        @app.get("/app/{full_path:path}")
-        def pwa_shell_or_asset(full_path: str):
-            hit = _pwa_file_or_none(full_path)
-            if hit is not None:
-                return FileResponse(hit)
-            return _spa_index()
+        @app.get("/app")
+        def pwa_index_no_slash():
+            return RedirectResponse(url="/app/")
 
     return app
